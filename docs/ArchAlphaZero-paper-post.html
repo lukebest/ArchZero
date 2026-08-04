@@ -3,18 +3,18 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>体系结构的 AlphaZero 时刻</title>
+<title>Paper Post · Computer Architecture’s AlphaZero Moment</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;900&family=IBM+Plex+Mono:wght@600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;900&family=IBM+Plex+Mono:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --red: #C7000B;
-    --red-deep: #8F0007;
+    --accent: #0B3D5C;
+    --accent-soft: #E8F1F6;
     --ink: #1A1A1A;
     --muted: #5A5A5A;
     --line: #E5E5E5;
-    --bg: #F6F5F3;
+    --bg: #F7F6F3;
   }
   * { box-sizing: border-box; }
   body {
@@ -22,7 +22,7 @@
     font-family: "Noto Sans SC", sans-serif;
     color: var(--ink);
     background:
-      radial-gradient(900px 420px at 100% 0%, rgba(199,0,11,.08), transparent 55%),
+      radial-gradient(900px 420px at 100% 0%, rgba(11,61,92,.08), transparent 55%),
       var(--bg);
     line-height: 1.5;
   }
@@ -41,15 +41,16 @@
     font-weight: 700;
     letter-spacing: .08em;
     text-transform: uppercase;
-    color: var(--red);
+    color: var(--accent);
     margin-bottom: 10px;
   }
   h1 {
     margin: 0;
+    font-family: "Source Serif 4", "Noto Sans SC", serif;
     font-size: clamp(28px, 4vw, 38px);
-    line-height: 1.15;
+    line-height: 1.18;
     letter-spacing: -.02em;
-    font-weight: 900;
+    font-weight: 700;
   }
   .sub {
     margin: 12px 0 0;
@@ -57,11 +58,13 @@
     font-size: 14px;
   }
   .sub b { color: var(--ink); font-weight: 600; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
 
   .thesis {
     margin: 0 0 28px;
     padding: 16px 18px;
-    background: linear-gradient(160deg, var(--red), var(--red-deep));
+    background: var(--accent);
     color: #fff;
     border-radius: 14px;
     font-size: 17px;
@@ -87,7 +90,7 @@
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
-    color: var(--red);
+    color: var(--accent);
   }
   p { margin: 0; font-size: 15px; color: #2E2E2E; }
   ul {
@@ -109,7 +112,7 @@
     left: 0; top: .62em;
     width: 5px; height: 5px;
     border-radius: 50%;
-    background: var(--red);
+    background: var(--accent);
   }
   .nums {
     display: grid;
@@ -135,7 +138,6 @@
     color: var(--muted);
   }
 
-  /* Idea Factory schematic */
   .arch {
     margin-top: 4px;
     border: 1px solid var(--line);
@@ -161,10 +163,9 @@
     border: 1px solid var(--line);
     border-radius: 12px;
     padding: 12px;
-    position: relative;
   }
   .layer.gen { border-top: 3px solid #1A1A1A; }
-  .layer.eval { border-top: 3px solid var(--red); }
+  .layer.eval { border-top: 3px solid var(--accent); }
   .layer.fb { border-top: 3px solid #0A7A3E; }
   .layer-tag {
     font-family: "IBM Plex Mono", monospace;
@@ -187,7 +188,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--red);
+    color: var(--accent);
     font-weight: 700;
     font-size: 18px;
   }
@@ -206,10 +207,7 @@
     color: var(--muted);
     letter-spacing: .04em;
   }
-  .tiers {
-    display: grid;
-    gap: 6px;
-  }
+  .tiers { display: grid; gap: 6px; }
   .tier {
     display: grid;
     grid-template-columns: 64px 1fr 72px;
@@ -224,12 +222,9 @@
     font-family: "IBM Plex Mono", monospace;
     font-size: 12px;
     font-weight: 700;
-    color: var(--red);
+    color: var(--accent);
   }
-  .tier .name {
-    font-size: 13px;
-    font-weight: 600;
-  }
+  .tier .name { font-size: 13px; font-weight: 600; }
   .tier .name small {
     display: block;
     font-weight: 400;
@@ -244,25 +239,13 @@
     text-align: right;
     color: var(--ink);
   }
-  .tier-bar-wrap {
-    grid-column: 1 / -1;
-    height: 3px;
-    background: #EEE;
-    border-radius: 2px;
-    margin-top: -2px;
-    overflow: hidden;
-  }
-  .tier-bar {
-    height: 100%;
-    background: linear-gradient(90deg, var(--red), #F05A5A);
-    border-radius: 2px;
-  }
 
   footer {
     margin-top: 22px;
     font-size: 12px;
     color: #888;
   }
+  footer a { color: var(--accent); }
 
   @media (max-width: 760px) {
     .grid, .nums, .layers { grid-template-columns: 1fr; }
@@ -275,16 +258,18 @@
 <body>
   <div class="page">
     <header>
-      <div class="eyebrow">体系结构研讨 · 一页纸</div>
-      <h1>计算机体系结构的 AlphaZero 时刻</h1>
+      <div class="eyebrow">Paper Post · Architecture</div>
+      <h1>Computer Architecture’s AlphaZero Moment</h1>
       <p class="sub">
-        解读 <b>arXiv:2604.03312v1</b> · Sankaralingam · NVIDIA Research · 2026
+        Reading note on
+        <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noopener">arXiv:2604.03312v1</a>
+        · Karthikeyan Sankaralingam · NVIDIA Research · 2026
       </p>
     </header>
 
     <p class="thesis">
-      工艺不再自动给 2×，架构成主杠杆；结构空间远超人力抽样能力。
-      解法是把探索建成自动化工厂——生成、分层评估、部署反馈闭环。
+      Process scaling no longer gifts a free 2×; architecture is the main lever, yet structural search space dwarfs human sampling.
+      The proposed path: an automated Idea Factory that loops generation, tiered evaluation, and deployment feedback.
     </p>
 
     <div class="grid">
@@ -386,7 +371,11 @@
     </div>
 
     <footer>
-      开源实验平台：github.com/VerticalResearchGroup/Gauntlet · 内部研讨材料，非正式译文
+      Paper:
+      <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noopener">arXiv:2604.03312</a>
+      · Code:
+      <a href="https://github.com/VerticalResearchGroup/Gauntlet" target="_blank" rel="noopener">Gauntlet</a>
+      · Reading note, not an official summary
     </footer>
   </div>
 </body>
