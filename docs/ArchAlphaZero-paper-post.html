@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Paper Post · Computer Architecture’s AlphaZero Moment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;900&family=IBM+Plex+Mono:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --accent: #0B3D5C;
+    --accent-soft: #E8F1F6;
+    --ink: #1A1A1A;
+    --muted: #5A5A5A;
+    --line: #E5E5E5;
+    --bg: #F7F6F3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Noto Sans SC", sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(900px 420px at 100% 0%, rgba(11,61,92,.08), transparent 55%),
+      var(--bg);
+    line-height: 1.5;
+  }
+  .page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 28px 56px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 22px;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  h1 {
+    margin: 0;
+    font-family: "Source Serif 4", "Noto Sans SC", serif;
+    font-size: clamp(28px, 4vw, 38px);
+    line-height: 1.18;
+    letter-spacing: -.02em;
+    font-weight: 700;
+  }
+  .sub {
+    margin: 12px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .sub b { color: var(--ink); font-weight: 600; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+
+  .thesis {
+    margin: 0 0 28px;
+    padding: 16px 18px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  section {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+  }
+  section.wide { grid-column: 1 / -1; }
+  h2 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  p { margin: 0; font-size: 15px; color: #2E2E2E; }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+  }
+  li {
+    position: relative;
+    padding-left: 14px;
+    font-size: 15px;
+    color: #2E2E2E;
+  }
+  li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: .62em;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .nums {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .num {
+    background: #FAFAF8;
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .num b {
+    display: block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-bottom: 2px;
+  }
+  .num span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .arch {
+    margin-top: 4px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #FAFAF8;
+    padding: 14px;
+  }
+  .arch-caption {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: .04em;
+    margin-bottom: 10px;
+  }
+  .layers {
+    display: grid;
+    grid-template-columns: 1fr 36px 1.35fr 36px 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+  .layer {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+  }
+  .layer.gen { border-top: 3px solid #1A1A1A; }
+  .layer.eval { border-top: 3px solid var(--accent); }
+  .layer.fb { border-top: 3px solid #0A7A3E; }
+  .layer-tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .layer h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .layer p {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 18px;
+  }
+  .loop-note {
+    margin-top: 10px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .loop-note b { color: var(--ink); }
+
+  .tiers-title {
+    margin: 14px 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .tiers { display: grid; gap: 6px; }
+  .tier {
+    display: grid;
+    grid-template-columns: 64px 1fr 72px;
+    gap: 10px;
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
+  .tier .id {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .tier .name { font-size: 13px; font-weight: 600; }
+  .tier .name small {
+    display: block;
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 11.5px;
+    margin-top: 1px;
+  }
+  .tier .count {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: right;
+    color: var(--ink);
+  }
+
+  footer {
+    margin-top: 22px;
+    font-size: 12px;
+    color: #888;
+  }
+  footer a { color: var(--accent); }
+
+  @media (max-width: 760px) {
+    .grid, .nums, .layers { grid-template-columns: 1fr; }
+    .connector { display: none; }
+    .tier { grid-template-columns: 56px 1fr 56px; }
+    section.wide { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="eyebrow">Paper Post · Architecture</div>
+      <h1>Computer Architecture’s AlphaZero Moment</h1>
+      <p class="sub">
+        Reading note on
+        <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noopener">arXiv:2604.03312v1</a>
+        · Karthikeyan Sankaralingam · NVIDIA Research · 2026
+      </p>
+    </header>
+
+    <p class="thesis">
+      Process scaling no longer gifts a free 2×; architecture is the main lever, yet structural search space dwarfs human sampling.
+      The proposed path: an automated Idea Factory that loops generation, tiered evaluation, and deployment feedback.
+    </p>
+
+    <div class="grid">
+      <section>
+        <h2>Motivation</h2>
+        <ul>
+          <li>制程缩放放缓：7→5nm / 5→3nm 密度增益约 1.7× / &lt;1.5×，换代节奏拉到 3–4 年</li>
+          <li>同晶体管预算仍要追约 2× 性能，跃迁必须主要来自架构</li>
+          <li>参数扫描已较充分，结构性创新几乎没被系统探索</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>问题洞察</h2>
+        <ul>
+          <li>人力每代认真评估的结构候选仅约 50–100</li>
+          <li>高价值机会可知却错过：Prefill/Decode 拆分、集合通信墙</li>
+          <li>稀缺的不是点子，是问题表述与可校准评估</li>
+        </ul>
+      </section>
+
+      <section class="wide">
+        <h2>解决方案 · Idea Factory Architecture</h2>
+
+        <div class="arch">
+          <div class="arch-caption">FIGURE · 三层闭环（对应论文 Figure 1）</div>
+          <div class="layers">
+            <div class="layer gen">
+              <div class="layer-tag">LAYER A</div>
+              <h3>Generation</h3>
+              <p>递归发现引擎：抽瓶颈 → 发明机制 → 垂直/横向/基础扩问题</p>
+            </div>
+            <div class="connector">→</div>
+            <div class="layer eval">
+              <div class="layer-tag">LAYER B</div>
+              <h3>Evaluation</h3>
+              <p>多智能体分层评估：速度与精度折中，失败结构化回流生成端</p>
+            </div>
+            <div class="connector">→</div>
+            <div class="layer fb">
+              <div class="layer-tag">LAYER C</div>
+              <h3>Feedback</h3>
+              <p>部署遥测校准各 Tier；负载漂移（如 MoE）提前出题</p>
+            </div>
+          </div>
+          <div class="loop-note">连续闭环：<b>Feedback → 再出题 → Generation</b>，非一次性 DSE</div>
+
+          <div class="tiers-title">LAYER B 内部 · 分层评估漏斗（Tier 0→5，共 6 级，保真度递增）</div>
+          <div class="tiers">
+            <div class="tier">
+              <div class="id">Tier 0</div>
+              <div class="name">第一性原理质性筛<small>机制是否自洽、物理可行 · 分钟级</small></div>
+              <div class="count">10k→2k</div>
+            </div>
+            <div class="tier">
+              <div class="id">Tier 1</div>
+              <div class="name">对抗式多专家评审<small>微架构 / 仿真方法 / 负载 / 实现可行性</small></div>
+              <div class="count">→500</div>
+            </div>
+            <div class="tier">
+              <div class="id">Tier 2</div>
+              <div class="name">解析模型<small>如 LIMINAL，Agent 扩展方程并预测瓶颈</small></div>
+              <div class="count">→100</div>
+            </div>
+            <div class="tier">
+              <div class="id">Tier 3</div>
+              <div class="name">专用仿真<small>Agent 现构建目的向性能模型 / 仿真</small></div>
+              <div class="count">→20</div>
+            </div>
+            <div class="tier">
+              <div class="id">Tier 4</div>
+              <div class="name">全仿真基础设施<small>ChampSim / gem5 插件与补丁集成</small></div>
+              <div class="count">→5</div>
+            </div>
+            <div class="tier">
+              <div class="id">Tier 5</div>
+              <div class="name">RTL / FPGA<small>必要时合成与原型；数字逻辑常不必到此</small></div>
+              <div class="count">→1–2</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nums">
+          <div class="num"><b>95%</b><span>机制可行率</span></div>
+          <div class="num"><b>48%</b><span>精确复现原机制</span></div>
+          <div class="num"><b>50%</b><span>有效替代路径</span></div>
+          <div class="num"><b>周级</b><span>替代数月设计周期</span></div>
+        </div>
+      </section>
+
+      <section class="wide">
+        <h2>愿景</h2>
+        <p>
+          人上移到定目标与约束；机器负责广域结构搜索与实现。
+          竞争优势从「灵感点子」转向「评估基建 + 遥测闭环」。
+          约两年内，纯人工驱动的架构探索将显著边缘化——谁先建成工厂，谁定义下一阶段加速器节奏。
+        </p>
+      </section>
+    </div>
+
+    <footer>
+      Paper:
+      <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noopener">arXiv:2604.03312</a>
+      · Code:
+      <a href="https://github.com/VerticalResearchGroup/Gauntlet" target="_blank" rel="noopener">Gauntlet</a>
+      · Reading note, not an official summary
+    </footer>
+  </div>
+</body>
+</html>
