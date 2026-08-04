@@ -1,94 +1,143 @@
 # ArchZero
 
-面向计算机体系结构的 **自动化 Idea Factory** 试验田：对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），拼装理解、出题、评估与落地链路，逼近文中描述的产品最终形态。
+面向计算机体系结构的 **自动化 Idea Factory**：对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），实现 Generation + Tier0–5 Evaluation 闭环。  
+**Feedback / 部署遥测层仅留接口，实现暂缓。**
 
 论文 PDF 与一页解读：[`docs/2604.03312v1.pdf`](docs/2604.03312v1.pdf) · [`docs/ArchAlphaZero-paper-post.html`](docs/ArchAlphaZero-paper-post.html)
 
 ---
 
-## 论文中的产品最终形态：Idea Factory
-
-论文主张：制程缩放放缓后，性能跃迁主要靠**架构**；结构搜索空间远超人力抽样。产品不是「再雇一批架构师」，而是建成可持续运转的 **自动化想法工厂**——人定目标与约束，机器负责广域结构探索与可校准评估。
-
-### 三层闭环（对应论文 Figure 1）
+## 产品形态（已实现范围）
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│ Generation  │ ──► │ Evaluation   │ ──► │ Feedback    │
-│ 递归发现引擎 │     │ 分层多智能体  │     │ 部署遥测校准 │
-└─────────────┘     └──────────────┘     └─────────────┘
-       ▲                                        │
-       └──────── 再出题 / 失败回流 ───────────────┘
+ProblemPackage (NDF-lite)
+        │
+        ▼
+Comprehension → Clean-room Ideation → Frontier 扩题
+        │
+        ▼
+Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5
+ 硬筛    对抗评审  解析模型  定向仿真  全仿真   RTL/PPA
+        │
+        └── Evolution (MAP-Elites / OpenEvolve 适配)
 ```
 
-| 层 | 职责 | 最终形态要点 |
-|----|------|----------------|
-| **Generation** | 从瓶颈与文献抽问题 → 发明多种机制 → 垂直/横向/基础扩问题前沿 | 稀缺的是问题表述，不是单个点子；解法可批量生成 |
-| **Evaluation** | Tier0→5 保真度递增漏斗；失败结构化回流生成端 | 周吞吐量级：约 1 万候选 → 落地候选约 1–2 |
-| **Feedback** | 现网遥测校准各层模型；负载漂移提前出题 | 护城河是**校准过的评估基建 + 遥测**，不是可逆向的点子 |
-
-### 评估漏斗（Evaluation 内部）
-
-| 档位 | 作用 | 典型周吞吐（论文示例） |
-|------|------|------------------------|
-| Tier 0 | 第一性原理质性筛 | 10k → 2k |
-| Tier 1 | 对抗式多专家评审 | → 500 |
-| Tier 2 | 解析模型（如 LIMINAL） | → 100 |
-| Tier 3 | 专用 / Agent 构建仿真 | → 20 |
-| Tier 4 | ChampSim / gem5 等全仿真集成 | → 5 |
-| Tier 5 | 必要时 RTL / FPGA | → 1–2 |
-
-瓶颈从「能否实现」变为「是否问对问题」。
-
-### 最终产品应具备的能力（验收视角）
-
-1. **问题工厂**：结构化问题包（上下文 / 症状 / 约束），可版本化、可复现实验协议（含 clean-room 机制生成评测）。  
-2. **周级漏斗**：统一 Candidate 对象，自动过 Tier0–5（或子集），淘汰率与失败模式可观测。  
-3. **快速量化**：论文/机制 → 可执行解析或仿真，分钟–小时级而非人月。  
-4. **闭环校准**：部署侧遥测持续修正评估误差，并驱动下一轮出题。  
-5. **角色上移**：人类定义目标、约束与可行性边界；机器承担广域搜索与实现试错。  
-6. **可选落地出口**：高价值候选进入 RTL / 物理实现环，在固定功能裁判下优化 PPA。
-
-作者时间判断（论文）：约两年内，纯人工驱动的架构探索将显著边缘化——**谁先建成工厂，谁定义下一阶段加速器节奏**。
+| 层 | 状态 |
+|----|------|
+| 规范 NDF-lite | ✅ 条款 ID / lint / 决策日志 |
+| Generation | ✅ 读论文、clean-room 四阶段、三向扩题 |
+| Evaluation Tier0–5 | ✅（Tier3/4 默认 stub 仿真；ChampSim/gem5 即插） |
+| Evolution | ✅ 内置 MAP-Elites；OpenEvolve 经 OpenAI shim → Cursor SDK |
+| LLM | ✅ **仅 Cursor SDK**；池感知路由（Cursor Models 池优先） |
+| Feedback 遥测 | ⏸️ 接口 `archzero/feedback/source.py`，未实现 |
 
 ---
 
-## 本仓库如何逼近该形态
+## 快速开始
 
-| 层 | 组件 | 状态 / 角色 |
-|----|------|-------------|
-| 规范与裁判 | [normative_language](https://github.com/lukebest/normative_language)（NDF 提案） | 问题、约束、验收、决策的 lifetime 圣经 |
-| 理解 / 出题 / 初评 | [Gauntlet](https://github.com/lukebest/Gauntlet)（submodule `Gauntlet/`） | 读论文、对抗评审、初版解析模型（`perf.py`） |
-| 可执行搜索 | [openevolve](https://github.com/lukebest/openevolve) | MAP-Elites 进化实现；适合 Tier2–4 后端 |
-| 硅落地环 | [agentic_circuit_optimizer](https://github.com/lukebest/agentic_circuit_optimizer)（方法论文档） | ASL→NDF→PyCircuit→RTL→物理；承接漏斗出口 |
+### 1. 依赖与 API Key
 
-**拼法：** NDF 定规矩 → Gauntlet 出题与初筛 → OpenEvolve 规模化搜实现 → Circuit Optimizer 路线接 Tier5/物理（候选已收敛后）。
-
----
-
-## 仓库分析文档
-
-| 文档 | 内容 |
-|------|------|
-| [docs/analysis-gauntlet.md](docs/analysis-gauntlet.md) | Gauntlet vs 论文覆盖度与缺口 |
-| [docs/analysis-openevolve.md](docs/analysis-openevolve.md) | OpenEvolve 对 Idea Factory 的价值 |
-| [docs/analysis-normative-language.md](docs/analysis-normative-language.md) | NDF 对问题/裁判层的价值 |
-| [docs/analysis-agentic-circuit-optimizer.md](docs/analysis-agentic-circuit-optimizer.md) | 前端/后端硅环与 Tier5+ 定位 |
-
----
-
-## 快速入口
+需要 Cursor **Pro 及以上**（Start 计划不含 SDK）。
 
 ```bash
-# 论文与一页解读
-open docs/ArchAlphaZero-paper-post.html   # 或浏览器打开
-
-# Gauntlet submodule（若尚未初始化）
-git submodule update --init --recursive
+export CURSOR_API_KEY="cursor_..."   # Dashboard → Integrations
+uv sync                              # 或: pip install -e ".[dev]"
 ```
+
+### 2. 自检模型目录与池划分
+
+```bash
+uv run archzero models
+```
+
+- **池 1 Cursor Models**（含量充裕）：`composer-2.5`、`cursor-grok-4.5` — 高吞吐（Tier0、进化、解析修复…）
+- **池 2 Other Models**（按 API 计价）：Claude / GPT / Gemini… — 低频高价值（Tier1 合成、规格、终审）
+
+### 3. 注册问题包并跑漏斗
+
+```bash
+uv run archzero spec specs/demo.md
+uv run archzero run --spec specs/demo.md --through tier2 --n 8
+uv run archzero report --out report.md
+```
+
+有论文 PDF 时：
+
+```bash
+uv run archzero read path/to/paper.pdf -o insights.md
+uv run archzero ideate path/to/paper.pdf --spec specs/demo.md -o candidates/
+uv run archzero run --spec specs/demo.md --pdf path/to/paper.pdf --through tier4
+```
+
+进化搜索（对已进入 Tier2 的候选）：
+
+```bash
+uv run archzero evolve --campaign <campaign_id>
+```
+
+---
+
+## 仓库结构
+
+```
+archzero/           # 产品代码
+  llm/              # Cursor SDK 客户端、目录、路由、预算、shim
+  spec/             # NDF-lite
+  generation/       # 理解 / clean-room / frontier（复用 Gauntlet personas）
+  funnel/           # Tier0–5 + pipeline
+  analytic/         # 共享解析核
+  sim/              # stub | champsim | gem5
+  evolve/           # MAP-Elites + OpenEvolve 适配
+  feedback/         # 遥测接口（暂缓）
+  report/           # 周级漏斗报告
+  store/            # SQLite + 内容寻址产物
+specs/demo.md       # 示例问题包
+Gauntlet/           # submodule：只读复用人设与协议
+docs/analysis-*.md  # 与外部仓库对照分析
+```
+
+状态目录（gitignore）：`.archzero/{factory.db,artifacts,transcripts,scratch}`
+
+---
+
+## 与外部仓库的整合方式
+
+| 来源 | 用法 |
+|------|------|
+| [Gauntlet](https://github.com/lukebest/Gauntlet) | **只读** submodule；复用 `personas/**` 与发散-收敛 / verify-repair 协议；LLM 调用全部改走 Cursor SDK |
+| [openevolve](https://github.com/lukebest/openevolve) | 可选 vendored 到 `vendor/openevolve`；经 `archzero/llm/shim.py`（OpenAI 兼容）转发到 Cursor；否则用内置 MAP-Elites |
+| [normative_language](https://github.com/lukebest/normative_language) | NDF 思想落地为 `archzero/spec`（轻量可运行版） |
+| [agentic_circuit_optimizer](https://github.com/lukebest/agentic_circuit_optimizer) | Tier5：提交点等价门 + PPA 钩子（Yosys/OpenSTA 可选） |
+
+分析文档见 [`docs/`](docs/)。
+
+---
+
+## 配置
+
+见 [`archzero.toml`](archzero.toml)。关键项：
+
+- `[pools]` — 模型偏好与池划分
+- `[budget]` — 池 2 token/调用上限、并发
+- `[quotas]` — 各 tier 保留名额
+- `[sim] backend` — `stub`（默认）/ `champsim` / `gem5`
+- `[evolve] backend` — `mapelites`（默认）/ `openevolve`
+
+---
+
+## 验收
+
+```bash
+uv run pytest
+uv run archzero models
+uv run archzero run --spec specs/demo.md --through tier2 --n 5
+uv run archzero report
+```
+
+端到端成功标志：候选写入 SQLite、Tier0–2 有裁决、`report.md` 含吞吐 / 失败分类 / 两池用量。
 
 ---
 
 ## 许可与归属
 
-论文归属原作者（Karthikeyan Sankaralingam / NVIDIA Research）。本仓库文档为内部对照与工程拼装笔记，非正式译文或官方实现声明。各 submodule / 外部仓遵循其自身许可证。
+论文归属原作者（Karthikeyan Sankaralingam / NVIDIA Research）。本仓库为工程实现与对照笔记。各 submodule / 外部仓遵循其自身许可证。

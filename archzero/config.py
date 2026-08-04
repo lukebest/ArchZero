@@ -1,0 +1,233 @@
+"""Configuration loading and defaults for the Idea Factory."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from archzero.models import TaskClass, Tier, UsagePool
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_STATE_DIR = ROOT / ".archzero"
+DEFAULT_CONFIG_PATH = ROOT / "archzero.toml"
+
+
+class PoolConfig(BaseModel):
+    cursor_models: list[str] = Field(
+        default_factory=lambda: ["composer-2.5", "cursor-grok-4.5"]
+    )
+    other_prefixes: list[str] = Field(
+        default_factory=lambda: ["claude-", "gpt-", "gemini-", "o1-", "o3-", "o4-"]
+    )
+    # Prefer these when available in catalog
+    preferred_cursor: str = "composer-2.5"
+    preferred_other: str = "claude-4.6-sonnet"
+    fallback_router: str = "auto-smart"
+    fallback_auto: str = "auto"
+    optimize_for: str = "balanced"
+
+
+class BudgetConfig(BaseModel):
+    other_pool_max_tokens: int = 2_000_000
+    other_pool_max_calls: int = 200
+    max_retries: int = 3
+    concurrency: int = 4
+
+
+class FunnelQuotas(BaseModel):
+    tier0_keep: int = 200
+    tier1_keep: int = 50
+    tier2_keep: int = 20
+    tier3_keep: int = 8
+    tier4_keep: int = 3
+    tier5_keep: int = 2
+
+    def keep_for(self, tier: Tier) -> int:
+        return {
+            Tier.T0: self.tier0_keep,
+            Tier.T1: self.tier1_keep,
+            Tier.T2: self.tier2_keep,
+            Tier.T3: self.tier3_keep,
+            Tier.T4: self.tier4_keep,
+            Tier.T5: self.tier5_keep,
+        }[tier]
+
+
+class TaskRouting(BaseModel):
+    """Map TaskClass → preferred UsagePool."""
+
+    routes: dict[str, str] = Field(
+        default_factory=lambda: {
+            TaskClass.BULK_SCREEN.value: UsagePool.CURSOR.value,
+            TaskClass.EVOLVE.value: UsagePool.CURSOR.value,
+            TaskClass.ANALYTIC.value: UsagePool.CURSOR.value,
+            TaskClass.COMPREHEND.value: UsagePool.CURSOR.value,
+            TaskClass.IDEATE.value: UsagePool.CURSOR.value,
+            TaskClass.SYNTHESIZE.value: UsagePool.OTHER.value,
+            TaskClass.SPEC_GEN.value: UsagePool.OTHER.value,
+            TaskClass.FINAL_JUDGE.value: UsagePool.OTHER.value,
+        }
+    )
+
+    def pool_for(self, task: TaskClass) -> UsagePool:
+        return UsagePool(self.routes.get(task.value, UsagePool.CURSOR.value))
+
+
+class SimConfig(BaseModel):
+    backend: str = "stub"  # stub | champsim | gem5
+    champsim_bin: str | None = None
+    gem5_bin: str | None = None
+    traces_dir: str | None = None
+
+
+class EvolveConfig(BaseModel):
+    backend: str = "mapelites"  # mapelites | openevolve
+    islands: int = 3
+    generations: int = 10
+    population_per_island: int = 20
+    feature_dims: list[str] = Field(
+        default_factory=lambda: ["family", "model_error", "speedup", "area_proxy"]
+    )
+
+
+class FactoryConfig(BaseModel):
+    state_dir: Path = DEFAULT_STATE_DIR
+    gauntlet_personas: Path = ROOT / "Gauntlet" / "personas"
+    cursor_api_key: str | None = None
+    pools: PoolConfig = Field(default_factory=PoolConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    quotas: FunnelQuotas = Field(default_factory=FunnelQuotas)
+    routing: TaskRouting = Field(default_factory=TaskRouting)
+    sim: SimConfig = Field(default_factory=SimConfig)
+    evolve: EvolveConfig = Field(default_factory=EvolveConfig)
+    cleanroom_n: int = 5  # independent generations per clean-room round
+    default_through: Tier = Tier.T2
+
+    @property
+    def db_path(self) -> Path:
+        return self.state_dir / "factory.db"
+
+    @property
+    def artifacts_dir(self) -> Path:
+        return self.state_dir / "artifacts"
+
+    @property
+    def transcripts_dir(self) -> Path:
+        return self.state_dir / "transcripts"
+
+    @property
+    def scratch_dir(self) -> Path:
+        return self.state_dir / "scratch"
+
+    def ensure_dirs(self) -> None:
+        for d in (
+            self.state_dir,
+            self.artifacts_dir,
+            self.transcripts_dir,
+            self.scratch_dir,
+        ):
+            d.mkdir(parents=True, exist_ok=True)
+
+    def resolved_api_key(self) -> str:
+        key = self.cursor_api_key or os.environ.get("CURSOR_API_KEY") or ""
+        if not key:
+            raise RuntimeError(
+                "CURSOR_API_KEY is not set. Export it from "
+                "Cursor Dashboard → Integrations, then retry."
+            )
+        return key.strip()
+
+
+def _deep_update(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_update(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_config(path: Path | None = None) -> FactoryConfig:
+    """Load FactoryConfig from TOML (optional) + env."""
+    cfg_path = path or DEFAULT_CONFIG_PATH
+    data: dict[str, Any] = {}
+    if cfg_path.is_file():
+        import tomllib
+
+        with cfg_path.open("rb") as f:
+            data = tomllib.load(f)
+
+    # Flatten nested sections into pydantic fields
+    flat: dict[str, Any] = {}
+    for key in (
+        "state_dir",
+        "gauntlet_personas",
+        "cursor_api_key",
+        "cleanroom_n",
+        "default_through",
+    ):
+        if key in data:
+            flat[key] = data[key]
+    for section in ("pools", "budget", "quotas", "routing", "sim", "evolve"):
+        if section in data and isinstance(data[section], dict):
+            flat[section] = data[section]
+
+    if "state_dir" in flat:
+        flat["state_dir"] = Path(flat["state_dir"])
+    if "gauntlet_personas" in flat:
+        flat["gauntlet_personas"] = Path(flat["gauntlet_personas"])
+
+    cfg = FactoryConfig(**flat)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def write_default_config(path: Path | None = None) -> Path:
+    """Write a starter archzero.toml if missing."""
+    target = path or DEFAULT_CONFIG_PATH
+    if target.exists():
+        return target
+    target.write_text(
+        """# ArchZero Idea Factory configuration
+# See archzero.config.FactoryConfig for all fields.
+
+# state_dir = ".archzero"
+# gauntlet_personas = "Gauntlet/personas"
+# cleanroom_n = 5
+# default_through = "tier2"
+
+[pools]
+preferred_cursor = "composer-2.5"
+preferred_other = "claude-4.6-sonnet"
+# cursor_models = ["composer-2.5", "cursor-grok-4.5"]
+
+[budget]
+other_pool_max_tokens = 2000000
+other_pool_max_calls = 200
+concurrency = 4
+
+[quotas]
+tier0_keep = 200
+tier1_keep = 50
+tier2_keep = 20
+tier3_keep = 8
+tier4_keep = 3
+tier5_keep = 2
+
+[sim]
+backend = "stub"
+# champsim_bin = "/opt/champsim/bin/champsim"
+# gem5_bin = "/opt/gem5/build/X86/gem5.opt"
+
+[evolve]
+backend = "mapelites"
+islands = 3
+generations = 10
+""",
+        encoding="utf-8",
+    )
+    return target

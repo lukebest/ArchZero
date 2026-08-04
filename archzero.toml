@@ -1,0 +1,26 @@
+# ArchZero Idea Factory configuration
+
+[pools]
+preferred_cursor = "composer-2.5"
+preferred_other = "claude-4.6-sonnet"
+
+[budget]
+other_pool_max_tokens = 2000000
+other_pool_max_calls = 200
+concurrency = 4
+
+[quotas]
+tier0_keep = 200
+tier1_keep = 50
+tier2_keep = 20
+tier3_keep = 8
+tier4_keep = 3
+tier5_keep = 2
+
+[sim]
+backend = "stub"
+
+[evolve]
+backend = "mapelites"
+islands = 3
+generations = 10
