@@ -19,6 +19,9 @@ from archzero.models import (
     Verdict,
 )
 from archzero.sim.backend import SimRequest, get_backend
+from archzero.sim.mechanism_model import report_magic_gap
+from archzero.sim.metrics import SimMetrics
+from archzero.spec.acc_parse import parse_acceptance_thresholds
 
 HARNESS_PERSONA = """You prepare a simulation harness for an architecture mechanism.
 Write sim_knobs.json with miss_reduction, extra_bw, area reflecting the mechanism.
@@ -34,11 +37,12 @@ async def evaluate_tier3(
     work = Path(candidate.workdir or (cfg.scratch_dir / candidate.id))
     work.mkdir(parents=True, exist_ok=True)
     candidate.workdir = str(work)
+    th = parse_acceptance_thresholds(problem)
 
     instruction = (
         f"Mechanism: {candidate.title}\n{candidate.mechanism}\n\n"
         f"Problem: {problem.title}\n"
-        "Create sim_knobs.json for the stub/ChampSim/gem5 adapter."
+        "Create sim_knobs.json for the stub/ChampSim/gem5/directed adapter."
     )
     try:
         await llm.work(HARNESS_PERSONA, instruction, TaskClass.ANALYTIC, cwd=work)
@@ -49,10 +53,11 @@ async def evaluate_tier3(
                 json.dumps(
                     {
                         "miss_reduction": float(
-                            candidate.metrics.get("t2_miss_reduction") or 0.12
+                            candidate.metrics.get("t2_miss_reduction") or 0.18
                         ),
                         "extra_bw": 0.02,
                         "area": 0.3,
+                        "family": candidate.family or "other",
                     },
                     indent=2,
                 ),
@@ -66,24 +71,53 @@ async def evaluate_tier3(
             workdir=work,
             patch_hint=candidate.mechanism[:500],
             suite="small",
+            meta={
+                "title": candidate.title,
+                "mechanism": candidate.mechanism,
+                "family": candidate.family,
+                "min_miss_reduction": th.min_miss_reduction,
+                "max_bw_delta_frac": th.max_bw_delta_frac,
+            },
         )
     )
     candidate.metrics.update({f"t3_{k}": v for k, v in sim.metrics.items()})
 
     reduction = float(sim.metrics.get("miss_reduction") or 0)
     bw = float(sim.metrics.get("bw_delta_frac") or 0)
-    gate_ok = sim.ok and reduction >= 0.10 and bw <= 0.05
+    metrics_obj = SimMetrics(
+        miss_reduction=reduction,
+        bw_delta_frac=bw,
+        evidence=str(sim.metrics.get("evidence") or "stub"),
+        backend=sim.backend,
+    )
+    gate_ok = sim.ok and metrics_obj.gate_ok(
+        min_reduction=th.min_miss_reduction, max_bw=th.max_bw_delta_frac
+    )
+
+    model_red = candidate.metrics.get("t2_miss_reduction")
+    gap = report_magic_gap(
+        float(model_red) if model_red is not None else None,
+        reduction,
+    )
+    if gap is not None:
+        candidate.metrics["t3_magic_gap"] = gap
+        if gap > th.max_magic_gap:
+            gate_ok = False
 
     evidence = EvidenceLevel.STUB
-    if sim.metrics.get("evidence") == "sim" or (
-        not sim.unavailable and cfg.sim.backend != "stub"
-    ):
+    ev = str(sim.metrics.get("evidence") or "")
+    if ev == "directed":
         evidence = EvidenceLevel.SIM
-    if str(sim.metrics.get("evidence") or "") == "stub":
+    elif ev == "sim" or (not sim.unavailable and cfg.sim.backend not in {"stub", "directed"}):
+        evidence = EvidenceLevel.SIM
+    if ev == "stub":
         evidence = EvidenceLevel.STUB
 
     # Fail-closed: configured real backend unavailable → UNAVAILABLE, never PASS
-    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend != "stub":
+    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend not in {
+        "stub",
+        "directed",
+    }:
         verdict = Verdict.UNAVAILABLE
         summary = (
             f"{sim.backend}: UNAVAILABLE (strict_evidence; configured "
@@ -94,7 +128,7 @@ async def evaluate_tier3(
             verdict=verdict,
             score=reduction,
             summary=summary,
-            metrics=sim.metrics,
+            metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap},
             evidence=EvidenceLevel.STUB,
             clause_refs=candidate.clause_refs,
         )
@@ -104,24 +138,31 @@ async def evaluate_tier3(
         return candidate
 
     if cfg.sim.backend == "stub" or evidence == EvidenceLevel.STUB:
-        # Explicit stub path: allowed only when backend is stub
-        if cfg.sim.backend != "stub" and cfg.funnel.strict_evidence:
+        if cfg.sim.backend not in {"stub", "directed"} and cfg.funnel.strict_evidence:
             verdict = Verdict.UNAVAILABLE
             summary = f"{sim.backend}: stub evidence rejected under strict_evidence"
         else:
             verdict = Verdict.PASS if gate_ok else Verdict.FAIL
-            summary = f"{sim.backend}: stub evidence reduction={reduction:.2%} bwΔ={bw:.2%}"
+            gap_note = f" magic_gap={gap:.2f}" if gap is not None else ""
+            summary = (
+                f"{sim.backend}: stub evidence reduction={reduction:.2%} "
+                f"bwΔ={bw:.2%}{gap_note}"
+            )
             evidence = EvidenceLevel.STUB
     else:
         verdict = Verdict.PASS if gate_ok else Verdict.FAIL
-        summary = f"{sim.backend}: reduction={reduction:.2%} bwΔ={bw:.2%} ok={gate_ok}"
+        gap_note = f" magic_gap={gap:.2f}" if gap is not None else ""
+        summary = (
+            f"{sim.backend}: reduction={reduction:.2%} bwΔ={bw:.2%} "
+            f"ok={gate_ok}{gap_note}"
+        )
 
     result = TierResult(
         tier=Tier.T3,
         verdict=verdict,
         score=reduction,
         summary=summary,
-        metrics=sim.metrics,
+        metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap},
         evidence=evidence,
         clause_refs=candidate.clause_refs,
     )

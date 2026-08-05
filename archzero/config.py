@@ -72,6 +72,8 @@ class FunnelConfig(BaseModel):
     strict_evidence: bool = True
     # Tier2: require majority of ensemble runs (when ensemble_n > 1)
     ensemble_n: int = 1
+    # Run quant_eval spec + functional verifiers before insight
+    use_verifiers: bool = True
     model_exec_timeout_s: int = 30
     model_exec_mem_mb: int = 512
 
@@ -100,7 +102,7 @@ class TaskRouting(BaseModel):
 
 
 class SimConfig(BaseModel):
-    backend: str = "stub"  # stub | champsim | gem5
+    backend: str = "stub"  # stub | champsim | gem5 | directed
     champsim_bin: str | None = None
     gem5_bin: str | None = None
     traces_dir: str | None = None
@@ -289,9 +291,11 @@ tier6_keep = 2
 [funnel]
 strict_evidence = true
 ensemble_n = 1
+use_verifiers = true
 
 [sim]
 backend = "stub"
+# backend = "directed"  # family event-model (Magic Gap friendly; not ChampSim)
 # champsim_bin = "tools/champsim/bin/champsim"
 # traces_dir = "benchmarks/traces"
 

@@ -38,7 +38,8 @@ class SimMetrics(BaseModel):
         d.update(extra)
         return d
 
-    def gate_ok(self, *, min_reduction: float = 0.10, max_bw: float = 0.05) -> bool:
+    def gate_ok(self, *, min_reduction: float = 0.15, max_bw: float = 0.05) -> bool:
+        """Default thresholds match demo ACC (≥15% MPKI, ≤5% BW); override from ACC parse."""
         r = float(self.miss_reduction or 0.0)
         bw = float(self.bw_delta_frac or 0.0)
         return r >= min_reduction and bw <= max_bw

@@ -48,6 +48,10 @@ def get_backend(cfg: FactoryConfig) -> SimBackend:
         from archzero.sim.gem5 import Gem5Backend
 
         return Gem5Backend(cfg)
+    if name == "directed":
+        from archzero.sim.directed import DirectedSimBackend
+
+        return DirectedSimBackend(cfg)
     from archzero.sim.stub import StubSimBackend
 
     return StubSimBackend(cfg)

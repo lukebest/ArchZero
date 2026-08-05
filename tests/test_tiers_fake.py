@@ -156,3 +156,53 @@ def test_parse_gem5_stats():
     m = parse_stats_text(sample)
     assert m["ipc"] == pytest.approx(1.5)
     assert m["mpki"] == pytest.approx(5.0)
+
+
+@pytest.mark.asyncio
+async def test_tier2_ensemble_majority(tmp_cfg, demo_problem, fake_llm):
+    from archzero.funnel.tier2 import evaluate_tier2
+
+    tmp_cfg.funnel.ensemble_n = 3
+    tmp_cfg.funnel.use_verifiers = True
+    c = Candidate(
+        problem_id=demo_problem.id,
+        title="ens",
+        mechanism="Filtered prefetch.",
+        workdir=str(tmp_cfg.scratch_dir / "ens"),
+    )
+    Path(c.workdir).mkdir(parents=True)
+    out = await evaluate_tier2(tmp_cfg, c, demo_problem, fake_llm)
+    tr = out.tier_history[-1]
+    assert tr.verdict == Verdict.PASS
+    assert tr.metrics["ensemble"]["n"] == 3
+    assert tr.metrics["ensemble"]["passes"] == 3
+    assert len(tr.metrics.get("verifiers") or []) == 2
+
+
+@pytest.mark.asyncio
+async def test_tier2_verifier_fail_blocks(tmp_cfg, demo_problem):
+    from archzero.funnel.tier2 import evaluate_tier2
+
+    tmp_cfg.funnel.ensemble_n = 1
+    tmp_cfg.funnel.use_verifiers = True
+    llm = FakeLLM(
+        responses={
+            "spec_gen": "# Spec\nAssumptions ok\n",
+            "comprehend": "**Status:** FAIL\nCritique:\n- Missing equations\n",
+            "analytic": (
+                "```python\ndef run_model():\n"
+                "    return {'predicted_mpki':6.0,'miss_reduction':0.2,"
+                "'ipc_speedup':1.1,'meets_target':True}\n```"
+            ),
+        }
+    )
+    c = Candidate(
+        problem_id=demo_problem.id,
+        title="vf",
+        mechanism="mech",
+        workdir=str(tmp_cfg.scratch_dir / "vf"),
+    )
+    Path(c.workdir).mkdir(parents=True)
+    out = await evaluate_tier2(tmp_cfg, c, demo_problem, llm)
+    assert out.tier_history[-1].verdict == Verdict.FAIL
+    assert "verifier" in out.tier_history[-1].summary.lower()
