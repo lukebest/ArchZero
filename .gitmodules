@@ -1,0 +1,3 @@
+[submodule "vendor/pycircuit"]
+	path = vendor/pycircuit
+	url = https://github.com/lukebest/pyCircuit.git
