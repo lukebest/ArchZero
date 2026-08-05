@@ -159,6 +159,7 @@ def test_parse_gem5_stats():
 
 
 @pytest.mark.asyncio
+@pytest.mark.ensemble
 async def test_tier2_ensemble_majority(tmp_cfg, demo_problem, fake_llm):
     from archzero.funnel.tier2 import evaluate_tier2
 

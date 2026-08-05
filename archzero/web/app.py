@@ -132,6 +132,7 @@ def make_handler(cfg: FactoryConfig):
                             "problem_id": camp.problem_id,
                         },
                         "funnel": _funnel_stats(store, cid),
+                        "elimination": (camp.meta or {}).get("elimination"),
                         "usage": store.usage_totals(cid),
                         "candidates": [_serialize_candidate(c) for c in cands],
                         "failures": [

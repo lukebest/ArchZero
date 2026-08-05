@@ -11,15 +11,17 @@
 
 | 层 | 状态 | 说明 |
 |----|------|------|
-| NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint |
-| Generation | Implemented | 读论文、clean-room、§5.1 frontier |
-| Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；写入 model_id / evidence |
-| Tier2 | Implemented | 沙箱执行 model.py；insight 与 meets_target 分歧则 FAIL |
-| Tier3 / Tier4 | Implemented / Stub | 默认 stub；ChampSim/gem5 解析真实指标；`strict_evidence` 禁止假 PASS |
-| Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator 等价性；工具缺失→UNAVAILABLE |
-| Tier6 Signoff | Planned (reserved) | 枚举/配置/`SignBackend` 骨架；`evaluate_tier6` 恒 UNAVAILABLE |
-| Evolution | Implemented | MAP-Elites 廉价解析评估 + 子代回流 T0–T2 |
-| Feedback 遥测 | Deferred | `NullFeedbackSource` 接口 only |
+| NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint；ACC 数值解析进 T2–T4 |
+| Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
+| Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
+| Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`archzero.paper.toml` 可开 ×3 |
+| Tier3 / Tier4 | Implemented / Stub | stub / directed / ChampSim；dedicated_sim 生成+自测；`strict_evidence` |
+| Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
+| Tier6 Signoff | Planned (reserved) | **暂不实现** OpenROAD/sky130；`evaluate_tier6` 恒 UNAVAILABLE |
+| Evolution | Implemented | MAP-Elites + reenter；失败消除度量 |
+| Corpus | Scaffold | `corpus-add-pdf` / `corpus-eval-offline`；不发明成功率 |
+| Scale-out | Prototype | Jaccard 去重 + `LocalWorkerPool`（单机） |
+| Feedback 遥测 | Deferred | **暂不实现**；`NullFeedbackSource` only |
 
 ```
 ProblemPackage (NDF-lite)

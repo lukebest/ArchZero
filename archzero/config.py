@@ -74,6 +74,8 @@ class FunnelConfig(BaseModel):
     ensemble_n: int = 1
     # Run quant_eval spec + functional verifiers before insight
     use_verifiers: bool = True
+    # Tier3: try LLM-authored dedicated_sim.py with template fallback
+    llm_dedicated_sim: bool = False
     model_exec_timeout_s: int = 30
     model_exec_mem_mb: int = 512
 
@@ -292,6 +294,7 @@ tier6_keep = 2
 strict_evidence = true
 ensemble_n = 1
 use_verifiers = true
+llm_dedicated_sim = false
 
 [sim]
 backend = "stub"

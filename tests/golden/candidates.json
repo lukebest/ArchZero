@@ -4,7 +4,11 @@
     "title": "Dead-block filtered prefetch",
     "family": "prefetch",
     "mechanism": "256-entry dead-block filter ahead of L2 prefetch degree 2.",
-    "fixture": {"miss_reduction": 0.20, "extra_bw": 0.02, "area": 0.25},
+    "fixture": {
+      "miss_reduction": 0.2,
+      "extra_bw": 0.02,
+      "area": 0.25
+    },
     "expect": {
       "tier3": "pass",
       "evidence": "stub"
@@ -24,7 +28,11 @@
     "title": "Signature miss coalescer",
     "family": "coalesce",
     "mechanism": "Coalesce overlapping L2 miss signatures.",
-    "fixture": {"miss_reduction": 0.08, "extra_bw": 0.01, "area": 0.2},
+    "fixture": {
+      "miss_reduction": 0.08,
+      "extra_bw": 0.01,
+      "area": 0.2
+    },
     "expect": {
       "tier3": "fail",
       "evidence": "stub"
@@ -35,7 +43,11 @@
     "title": "History-length adaptive streamer",
     "family": "streamer",
     "mechanism": "Streamer with history length 4 and aggressive degree 4.",
-    "fixture": {"miss_reduction": 0.18, "extra_bw": 0.02, "area": 0.3},
+    "fixture": {
+      "miss_reduction": 0.18,
+      "extra_bw": 0.02,
+      "area": 0.3
+    },
     "expect": {
       "tier3": "pass",
       "evidence": "stub"
@@ -46,7 +58,11 @@
     "title": "Bypass-aware writeback throttle",
     "family": "bypass",
     "mechanism": "Bypass threshold 0.6 writeback throttle.",
-    "fixture": {"miss_reduction": 0.17, "extra_bw": 0.01, "area": 0.22},
+    "fixture": {
+      "miss_reduction": 0.22,
+      "extra_bw": 0.01,
+      "area": 0.22
+    },
     "expect": {
       "tier3": "pass",
       "evidence": "stub"
@@ -66,7 +82,11 @@
     "title": "Aggressive prefetcher",
     "family": "prefetch",
     "mechanism": "Prefetch degree 8 without filter.",
-    "fixture": {"miss_reduction": 0.22, "extra_bw": 0.12, "area": 0.3},
+    "fixture": {
+      "miss_reduction": 0.22,
+      "extra_bw": 0.12,
+      "area": 0.3
+    },
     "expect": {
       "tier3": "fail",
       "evidence": "stub"
@@ -77,7 +97,11 @@
     "title": "Tiny table filter",
     "family": "filter",
     "mechanism": "16-entry filter with weak accuracy.",
-    "fixture": {"miss_reduction": 0.05, "extra_bw": 0.01, "area": 0.1},
+    "fixture": {
+      "miss_reduction": 0.05,
+      "extra_bw": 0.01,
+      "area": 0.1
+    },
     "expect": {
       "tier3": "fail",
       "evidence": "stub"
@@ -88,7 +112,11 @@
     "title": "ChampSim path without binary",
     "family": "prefetch",
     "mechanism": "Would need ChampSim; binary intentionally missing.",
-    "fixture": {"miss_reduction": 0.2, "extra_bw": 0.02, "area": 0.25},
+    "fixture": {
+      "miss_reduction": 0.2,
+      "extra_bw": 0.02,
+      "area": 0.25
+    },
     "expect": {
       "tier3": "unavailable",
       "backend": "champsim"
@@ -99,7 +127,12 @@
     "title": "Directed event-model prefetch",
     "family": "prefetch",
     "mechanism": "256-entry filtered prefetch degree 2 for Magic Gap check.",
-    "fixture": {"miss_reduction": 0.30, "extra_bw": 0.02, "area": 0.25, "family": "prefetch"},
+    "fixture": {
+      "miss_reduction": 0.3,
+      "extra_bw": 0.02,
+      "area": 0.25,
+      "family": "prefetch"
+    },
     "expect": {
       "tier3": "pass",
       "evidence": "directed",
@@ -111,7 +144,12 @@
     "title": "RRPV-like replacement",
     "family": "replacement",
     "mechanism": "Replacement with history length 12 and 512 entries.",
-    "fixture": {"miss_reduction": 0.28, "extra_bw": 0.01, "area": 0.2, "family": "replacement"},
+    "fixture": {
+      "miss_reduction": 0.28,
+      "extra_bw": 0.01,
+      "area": 0.2,
+      "family": "replacement"
+    },
     "expect": {
       "tier3": "pass",
       "evidence": "directed",
@@ -123,8 +161,15 @@
     "title": "Overconfident analytic",
     "family": "prefetch",
     "mechanism": "Claims huge analytic gain; directed sim stays modest.",
-    "fixture": {"miss_reduction": 0.08, "extra_bw": 0.02, "area": 0.25, "family": "prefetch"},
-    "metrics": {"t2_miss_reduction": 0.50},
+    "fixture": {
+      "miss_reduction": 0.08,
+      "extra_bw": 0.02,
+      "area": 0.25,
+      "family": "prefetch"
+    },
+    "metrics": {
+      "t2_miss_reduction": 0.5
+    },
     "expect": {
       "tier3": "fail",
       "evidence": "directed",

@@ -161,6 +161,8 @@
     <div id="funnel" class="funnel"><div class="empty">选择左侧 campaign</div></div>
     <h2>Failure taxonomy</h2>
     <div id="failures" class="failbars"><div class="empty">—</div></div>
+    <h3 style="margin-top:1rem">Failure elimination</h3>
+    <div id="eliminationBox" class="empty">—</div>
     <h2>Candidates</h2>
     <div id="cands"><div class="empty">—</div></div>
     <div id="detail">
@@ -285,6 +287,21 @@ async function loadDetail(id) {
   (data.failures || []).forEach(f => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
   const kinds = Object.entries(counts).sort((a,b) => b[1]-a[1]);
   const maxF = kinds.length ? kinds[0][1] : 1;
+  const elim = data.elimination;
+  const elimEl = document.getElementById("eliminationBox");
+  if (elimEl) {
+    if (elim && (elim.kinds_eliminated || elim.kind_elimination_rate != null)) {
+      elimEl.className = "";
+      elimEl.innerHTML = `<div style="font-size:0.85rem">
+        eliminated: <code>${(elim.kinds_eliminated||[]).join(", ")||"—"}</code><br/>
+        reduced: <code>${(elim.kinds_reduced||[]).join(", ")||"—"}</code><br/>
+        rate: <code>${elim.kind_elimination_rate ?? "—"}</code>
+      </div>`;
+    } else {
+      elimEl.className = "empty";
+      elimEl.textContent = "— (no follow-up elimination meta)";
+    }
+  }
   document.getElementById("failures").innerHTML = kinds.length
     ? kinds.map(([k,v]) => `
       <div class="failrow">

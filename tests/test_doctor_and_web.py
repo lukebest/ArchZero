@@ -7,6 +7,15 @@ from archzero.store.db import Store
 from archzero.web.app import _funnel_stats, make_handler
 
 
+def test_doctor_has_corpus_and_worker_checks(tmp_cfg):
+    from archzero.doctor import run_doctor
+
+    names = {c.name for c in run_doctor(tmp_cfg)}
+    assert "corpus scaffold" in names
+    assert "worker pool" in names
+    assert "ChampSim optional" in names
+
+
 def test_doctor_reports_checks(tmp_path):
     cfg = FactoryConfig(
         state_dir=tmp_path / "state",

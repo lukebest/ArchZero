@@ -7,6 +7,7 @@ from typing import Any
 
 from archzero.config import FactoryConfig
 from archzero.models import Tier, Verdict
+from archzero.metrics.elimination import compute_elimination
 from archzero.store.db import Store
 
 
@@ -76,6 +77,10 @@ def compare_campaigns(cfg: FactoryConfig, a: str, b: str) -> dict[str, Any]:
         for k in kinds
     ]
 
+    elimination = compute_elimination(
+        store, source_campaign_id=a, followup_campaign_id=b
+    )
+
     return {
         "a": {
             "id": ca.id,
@@ -97,6 +102,7 @@ def compare_campaigns(cfg: FactoryConfig, a: str, b: str) -> dict[str, Any]:
         },
         "funnel": by_tier,
         "failures": fail_rows,
+        "elimination": elimination,
     }
 
 
@@ -122,4 +128,12 @@ def format_compare_text(data: dict[str, Any]) -> str:
         )
     if not data["failures"]:
         lines.append("| — | 0 | 0 | 0 |")
+    elim = data.get("elimination") or {}
+    lines += [
+        "",
+        "## Failure elimination (A→B)",
+        f"- kinds eliminated: {', '.join(elim.get('kinds_eliminated') or []) or '—'}",
+        f"- kinds reduced: {', '.join(elim.get('kinds_reduced') or []) or '—'}",
+        f"- kind_elimination_rate: {elim.get('kind_elimination_rate')}",
+    ]
     return "\n".join(lines) + "\n"

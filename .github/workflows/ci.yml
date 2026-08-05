@@ -22,3 +22,18 @@ jobs:
         env:
           # Offline tests must not require a live Cursor key
           CURSOR_API_KEY: ""
+
+  paper-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --extra dev
+      - name: Paper profile + directed/ensemble
+        run: uv run pytest -q -m "directed or ensemble or paper"
+        env:
+          CURSOR_API_KEY: ""
+

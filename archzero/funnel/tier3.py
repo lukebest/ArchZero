@@ -19,6 +19,7 @@ from archzero.models import (
     Verdict,
 )
 from archzero.sim.backend import SimRequest, get_backend
+from archzero.sim.generate import generate_dedicated_sim, generate_dedicated_sim_llm
 from archzero.sim.mechanism_model import report_magic_gap
 from archzero.sim.metrics import SimMetrics
 from archzero.spec.acc_parse import parse_acceptance_thresholds
@@ -63,6 +64,38 @@ async def evaluate_tier3(
                 ),
                 encoding="utf-8",
             )
+
+    # Generate audit-able dedicated simulator source (prefetch/replacement/bypass…)
+    knobs_path = work / "sim_knobs.json"
+    knobs_data = {}
+    if knobs_path.exists():
+        try:
+            knobs_data = json.loads(knobs_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            knobs_data = {}
+    if cfg.funnel.llm_dedicated_sim:
+        gen = await generate_dedicated_sim_llm(
+            work,
+            title=candidate.title,
+            mechanism=candidate.mechanism,
+            knobs=knobs_data,
+            family=candidate.family,
+            llm=llm,
+        )
+    else:
+        gen = generate_dedicated_sim(
+            work,
+            title=candidate.title,
+            mechanism=candidate.mechanism,
+            knobs=knobs_data,
+            family=candidate.family,
+        )
+    candidate.metrics["t3_dedicated_selftest"] = gen.selftest_ok
+    candidate.metrics["t3_dedicated_family"] = gen.family
+    if gen.selftest_ok and gen.metrics:
+        candidate.metrics["t3_dedicated_miss_reduction"] = gen.metrics.get(
+            "miss_reduction"
+        )
 
     backend = get_backend(cfg)
     sim = backend.run(
@@ -128,7 +161,10 @@ async def evaluate_tier3(
             verdict=verdict,
             score=reduction,
             summary=summary,
-            metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap},
+            metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap,
+                 "dedicated_selftest": gen.selftest_ok,
+                 "dedicated_family": gen.family,
+                 "dedicated_metrics": gen.metrics},
             evidence=EvidenceLevel.STUB,
             clause_refs=candidate.clause_refs,
         )
@@ -162,7 +198,10 @@ async def evaluate_tier3(
         verdict=verdict,
         score=reduction,
         summary=summary,
-        metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap},
+        metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap,
+                 "dedicated_selftest": gen.selftest_ok,
+                 "dedicated_family": gen.family,
+                 "dedicated_metrics": gen.metrics},
         evidence=evidence,
         clause_refs=candidate.clause_refs,
     )

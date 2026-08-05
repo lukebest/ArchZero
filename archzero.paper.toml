@@ -1,0 +1,17 @@
+# Paper-protocol profile: denser Tier2 + directed Tier3 event model.
+# Usage: archzero -c archzero.paper.toml run --spec specs/demo.md --through tier3
+
+[funnel]
+strict_evidence = true
+ensemble_n = 3
+use_verifiers = true
+llm_dedicated_sim = true
+
+[sim]
+backend = "directed"
+
+# Tier6 signoff and deployment Feedback remain deferred — not enabled here.
+
+[evolve]
+backend = "mapelites"
+reenter_through = "tier2"
