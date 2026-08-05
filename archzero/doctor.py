@@ -31,15 +31,19 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
         )
     )
 
-    personas = cfg.gauntlet_personas
-    n_personas = len(list(personas.rglob("*.md"))) if personas.is_dir() else 0
+    personas = cfg.personas_root
+    n_personas = (
+        len([p for p in personas.rglob("*.md") if p.name != "README.md"])
+        if personas and personas.is_dir()
+        else 0
+    )
     checks.append(
         Check(
-            name="Gauntlet personas",
+            name="personas",
             ok=n_personas > 0,
             detail=f"{n_personas} personas under {personas}"
             if n_personas
-            else f"missing directory {personas} (run: git submodule update --init)",
+            else f"missing directory {personas} (expected archzero/personas)",
             severity="error",
         )
     )

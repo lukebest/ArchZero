@@ -95,7 +95,9 @@ class EvolveConfig(BaseModel):
 
 class FactoryConfig(BaseModel):
     state_dir: Path = DEFAULT_STATE_DIR
-    gauntlet_personas: Path = ROOT / "Gauntlet" / "personas"
+    personas_dir: Path = ROOT / "archzero" / "personas"
+    # Legacy alias (tests / old toml); if set, overrides personas_dir
+    gauntlet_personas: Path | None = None
     cursor_api_key: str | None = None
     pools: PoolConfig = Field(default_factory=PoolConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
@@ -105,6 +107,13 @@ class FactoryConfig(BaseModel):
     evolve: EvolveConfig = Field(default_factory=EvolveConfig)
     cleanroom_n: int = 5  # independent generations per clean-room round
     default_through: Tier = Tier.T2
+
+    @property
+    def personas_root(self) -> Path:
+        """Resolved personas directory (legacy gauntlet_personas wins if set)."""
+        if self.gauntlet_personas is not None:
+            return self.gauntlet_personas
+        return self.personas_dir
 
     @property
     def db_path(self) -> Path:
@@ -166,6 +175,7 @@ def load_config(path: Path | None = None) -> FactoryConfig:
     for key in (
         "state_dir",
         "gauntlet_personas",
+        "personas_dir",
         "cursor_api_key",
         "cleanroom_n",
         "default_through",
@@ -178,6 +188,8 @@ def load_config(path: Path | None = None) -> FactoryConfig:
 
     if "state_dir" in flat:
         flat["state_dir"] = Path(flat["state_dir"])
+    if "personas_dir" in flat:
+        flat["personas_dir"] = Path(flat["personas_dir"])
     if "gauntlet_personas" in flat:
         flat["gauntlet_personas"] = Path(flat["gauntlet_personas"])
 
@@ -196,7 +208,7 @@ def write_default_config(path: Path | None = None) -> Path:
 # See archzero.config.FactoryConfig for all fields.
 
 # state_dir = ".archzero"
-# gauntlet_personas = "Gauntlet/personas"
+# personas_dir = "archzero/personas"
 # cleanroom_n = 5
 # default_through = "tier2"
 

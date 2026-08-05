@@ -106,7 +106,8 @@ uv run archzero next-questions --campaign <id>          # 失败回流成下一�
 archzero/           # 产品代码
   llm/              # Cursor SDK 客户端、目录、路由、预算、shim
   spec/             # NDF-lite
-  generation/       # 理解 / clean-room / frontier（复用 Gauntlet personas）
+  generation/       # 理解 / clean-room / frontier
+  personas/         # 评审/读论文人设（自 Gauntlet 精选迁入，引擎未使用）
   funnel/           # Tier0–5 + pipeline
   analytic/         # 共享解析核
   sim/              # stub | champsim | gem5
@@ -117,7 +118,6 @@ archzero/           # 产品代码
   web/              # 本地研究员看板（stdlib HTTP + 单页 UI）
   doctor.py         # 运行前环境自检
 specs/demo.md       # 示例问题包
-Gauntlet/           # submodule：只读复用人设与协议
 docs/analysis-*.md  # 与外部仓库对照分析
 ```
 
@@ -129,7 +129,7 @@ docs/analysis-*.md  # 与外部仓库对照分析
 
 | 来源 | 用法 |
 |------|------|
-| [Gauntlet](https://github.com/lukebest/Gauntlet) | **只读** submodule；复用 `personas/**` 与发散-收敛 / verify-repair 协议；LLM 调用全部改走 Cursor SDK |
+| [Gauntlet](https://github.com/lukebest/Gauntlet) | **已移除 submodule**。引擎（Anthropic/Gemini 脚本）未被调用；核心出题/评审/量化已在 ArchZero 用 Cursor SDK 重写。精选 `personas/` 迁入 `archzero/personas/` |
 | [openevolve](https://github.com/lukebest/openevolve) | 可选 vendored 到 `vendor/openevolve`；经 `archzero/llm/shim.py`（OpenAI 兼容）转发到 Cursor；否则用内置 MAP-Elites |
 | [normative_language](https://github.com/lukebest/normative_language) | NDF 思想落地为 `archzero/spec`（轻量可运行版） |
 | [agentic_circuit_optimizer](https://github.com/lukebest/agentic_circuit_optimizer) | Tier5：提交点等价门 + PPA 钩子（Yosys/OpenSTA 可选） |

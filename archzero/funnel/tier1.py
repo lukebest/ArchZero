@@ -1,4 +1,4 @@
-"""Tier 1 — adversarial multi-expert review + synthesizer (Gauntlet protocol)."""
+"""Tier 1 — adversarial multi-expert review + synthesizer (divergence–convergence)."""
 
 from __future__ import annotations
 
