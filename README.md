@@ -104,6 +104,134 @@ uv run archzero run --spec specs/demo.md --n 5 \
 
 ---
 
+## NDF-lite 问题包编写规则
+
+Idea Factory 的「宪法」是一份 Markdown **ProblemPackage**（NDF-lite）。Generation 按条款探索，Evaluation 按条款裁决；条款 ID 应稳定，便于失败归因与跨轮复用。完整示例见 [`specs/demo.md`](specs/demo.md)；脚手架：`uv run archzero new-spec …`；校验：`uv run archzero spec path/to/spec.md`。
+
+### 文件结构
+
+```markdown
+---
+id: pp-demo-cache
+title: "Demo — reduce L2 miss penalty under LLM decode traffic"
+open_questions:
+  - Can a small predictor cut MPKI without blowing area?
+decisions: []
+workload: "LLM decode / token generation"
+---
+
+# <与 title 一致的标题>
+
+### CTX-001 — Workload context
+…
+### REQ-001 — Miss-rate reduction
+`refines: CTX-001`
+…
+```
+
+| 区域 | 规则 |
+|------|------|
+| YAML frontmatter | 建议含 `id`、`title`；可选 `open_questions`、`decisions`、`workload` 等元数据 |
+| 正文标题 | `# …` 一级标题；条款用三级标题 |
+| 条款标题格式 | `### <KIND>-<NNN> — <短标题>`（`—` / `-` / `:` 均可） |
+| 条款 ID | `CTX\|REQ\|ACC\|DOF\|NNG\|DEC` + `-` + 数字，例如 `REQ-001`；**全局唯一、创建后勿改号** |
+| 精化链接 | 正文内一行 `` `refines: REQ-001, REQ-002` ``（逗号分隔多个父条款） |
+| 可测标记 | ACC 可写 `` `measurable: true` ``（ACC 默认即视为可测） |
+
+### 条款种类（KIND）
+
+| 前缀 | 全称 | 含义 | 写什么 |
+|------|------|------|--------|
+| **CTX** | Context | 问题成立的背景与边界条件 | 负载特征、基线症状、硬件信封（工艺/面积/带宽/延迟预算）、假设与场景。**不写**「应当达成什么」 |
+| **REQ** | Requirement | 规范性要求（shall / must / must not） | 相对基线的目标与硬约束。用可核对的指标与阈值（如「L2 MPKI ≥15% 下降」「带宽增加 ≤5% @ iso-IPC」） |
+| **NNG** | Non-goal | 明确不做 / 不改的范围 | 防止搜索漂移：如「不改 ISA / 不动 NoC / 不要求 OS 改动」。与 REQ 对立面互补 |
+| **ACC** | Acceptance | 可执行的验收标准 | 怎样算通过某一 REQ：解析模型阈值、Magic Gap、仿真 workload、对比基线。应 `refines` 到对应 REQ，并尽量可测 |
+| **DOF** | Degree of freedom | 合法探索空间 | 允许 Generation / Evolution 搜索的旋钮：表项大小、历史长度、机制族（prefetch vs filter）等。**写开放空间，不写单一解** |
+| **DEC** | Decision | 已冻结的设计决策 | 「为什么这样定」的沉淀；也可放在 frontmatter `decisions`。减少重复争论，后续轮次默认遵守 |
+
+### 条款之间的关系
+
+推荐精化树（`refines`）：
+
+```
+CTX（场景 / 硬件信封）
+ └─ REQ（目标与约束）
+     └─ ACC（如何证明 REQ 成立）
+NNG、DOF、DEC 通常挂在包级；DOF 可 refines 相关 CTX/REQ
+```
+
+- **CTX → REQ**：要求必须锚定在某个场景或资源信封上。  
+- **REQ → ACC**：每个重要 REQ 至少一条可测 ACC；一条 ACC 可 refine 多条 REQ。  
+- **NNG**：切开「优化空间」与「禁区」，避免工厂把非目标当自由度。  
+- **DOF**：告诉进化/出题「可以动哪里」；漏斗失败后扩题常沿着 DOF 或 NNG 边界推进。  
+- **DEC**：一旦写入，视为本 campaign 的既定事实，除非显式修订并记新 DEC。
+
+### 写作规范
+
+1. **一条条款一件事**；短标题说明意图，正文写规范内容。  
+2. **REQ / ACC 用规范性用语**：`shall` / `must` / `must not`；避免「尽量」「可能更好」。  
+3. **数字与基线成对出现**：写清度量、对比对象、工作负载套件（或合成 trace 假设）。  
+4. **ACC 必须可判定**：解析模型（Tier2）、stub/ChampSim/gem5（Tier3/4）等能给出 pass/fail；注明 Magic Gap 等容差。  
+5. **DOF 写维度与范围**，不写具体获胜配置；具体配置属于 Candidate，不属于问题包。  
+6. **ID 稳定**：交叉引用、失败 taxonomy、`next-questions` 都靠 ID；改文可以，改号会断链。  
+7. **至少包含**：≥1 条 `REQ-*`、≥1 条 `ACC-*`（lint 强制）；实践上还应有 CTX，并建议有 NNG + DOF。
+
+### Lint 会检查什么
+
+`archzero spec <file>` / `new-spec` 后自动 lint，常见问题：
+
+- 重复条款 ID  
+- `refines` 指向不存在的 ID  
+- 缺少 `REQ-*` 或 `ACC-*`  
+- ACC 正文难以看出可测性（无 measure/shall，且未标 `measurable`）  
+- 空 `title`
+
+### 最小可用骨架
+
+```markdown
+---
+id: pp-my-problem
+title: "短标题：瓶颈 + 场景"
+open_questions:
+  - 最值得先搜的 DOF 是哪一维？
+---
+
+# 短标题：瓶颈 + 场景
+
+### CTX-001 — Workload / symptom
+<负载与症状>
+
+### CTX-002 — Hardware envelope
+`refines: CTX-001`
+<面积 / 带宽 / 延迟等信封>
+
+### REQ-001 — Primary objective
+`refines: CTX-001`
+The mechanism shall <可量化目标> versus the unmodified baseline.
+
+### REQ-002 — Hard constraint
+`refines: CTX-002`
+The mechanism must not <硬约束>.
+
+### NNG-001 — Non-goals
+Do not <明确不做的事>.
+
+### ACC-001 — Analytic acceptance
+`refines: REQ-001`
+`measurable: true`
+Tier2 analytic model shall show <目标>；Magic Gap ≤ 2× if sim available.
+
+### ACC-002 — Simulation acceptance
+`refines: REQ-001, REQ-002`
+`measurable: true`
+Stub or ChampSim/gem5 shall confirm the above on <workload>.
+
+### DOF-001 — Search space
+Open degrees of freedom: <可搜索维度列表>.
+```
+
+---
+
 ## 仓库结构
 
 ```
