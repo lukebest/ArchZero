@@ -1,9 +1,9 @@
 # Gauntlet 对照论文分析
 
 - **仓库：** [github.com/lukebest/Gauntlet](https://github.com/lukebest/Gauntlet)
-- **本地：** submodule `Gauntlet/`（若已添加）
+- **本地：** ~~submodule `Gauntlet/`~~ **已移除**（2026-08）。引擎未接入；精选人设迁入 `archzero/personas/`。
 - **对照论文：** [arXiv:2604.03312](https://arxiv.org/abs/2604.03312) — *Computer Architecture’s AlphaZero Moment*
-- **结论：** 基本对应论文中的 **Gauntlet 实验套件**（理解 / 出题 / 量化三条能力），**不是**完整 Idea Factory 三层闭环。
+- **结论（历史）：** 对应论文中的 **Gauntlet 实验套件**；ArchZero 已用 Cursor SDK 重写其核心能力，故不再保留 submodule。
 
 ---
 

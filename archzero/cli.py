@@ -115,7 +115,7 @@ def read_cmd(
     pdf: Path = typer.Argument(..., exists=True, help="Paper PDF"),
     out: Path = typer.Option(Path("insights.md"), "--out", "-o"),
     personas: Optional[str] = typer.Option(
-        None, "--personas", help="Comma-separated persona stems under Gauntlet/personas"
+        None, "--personas", help="Comma-separated persona stems under archzero/personas"
     ),
 ) -> None:
     """Comprehension: multi-persona paper distillation."""
