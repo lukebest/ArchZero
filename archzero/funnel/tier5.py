@@ -1,76 +1,28 @@
-"""Tier 5 — RTL / PPA exit hook (agentic_circuit_optimizer methodology).
+"""Tier 5 — RTL via pyCircuit DSL → Verilog → Verilator equivalence.
 
-Commit-point architectural-trace equivalence gate is fixed and non-drifting.
-PPA via Yosys/OpenSTA when available; otherwise mark unavailable without
-blocking the rest of the funnel incorrectly.
+Fail-closed: missing toolchain → UNAVAILABLE, never proxy PASS.
 """
 
 from __future__ import annotations
 
-import json
-import re
-import shutil
-import subprocess
 from pathlib import Path
 
 from archzero.config import FactoryConfig
+from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.llm.client import CursorLLM
-from archzero.models import Candidate, ProblemPackage, TaskClass, Tier, TierResult, Verdict
-
-RTL_PERSONA = """You prepare a minimal RTL / PyCircuit-style sketch for PPA probing.
-Write:
-1) EQUIV_GATE.md — commit-point equivalence definition (fixed referee)
-2) rtl_stub.v — simplified Verilog module capturing the mechanism interface
-3) DECISION.md — what was optimized and which clauses it satisfies
-Do NOT change the equivalence definition once written."""
-
-
-def _tool_available(name: str) -> bool:
-    return shutil.which(name) is not None
-
-
-def _run_yosys(workdir: Path) -> dict:
-    rtl = workdir / "rtl_stub.v"
-    if not rtl.exists():
-        return {"available": False, "error": "missing rtl_stub.v"}
-    script = (
-        f"read_verilog {rtl.name}; proc; opt; stat; hierarchy -check; "
-        f"tee -o yosys_stat.txt stat"
-    )
-    try:
-        proc = subprocess.run(
-            ["yosys", "-p", script],
-            cwd=str(workdir),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"available": True, "ok": False, "error": str(exc)}
-    area_proxy = None
-    stat_path = workdir / "yosys_stat.txt"
-    text = stat_path.read_text(encoding="utf-8") if stat_path.exists() else proc.stdout
-    m = re.search(r"Number of cells:\s*(\d+)", text)
-    if m:
-        area_proxy = int(m.group(1))
-    return {
-        "available": True,
-        "ok": proc.returncode == 0,
-        "area_cells": area_proxy,
-        "log_tail": proc.stdout[-1500:],
-    }
-
-
-def _run_opensta(workdir: Path) -> dict:
-    if not _tool_available("sta") and not _tool_available("opensta"):
-        return {"available": False}
-    # Without liberty/netlist flow, mark unavailable
-    return {
-        "available": False,
-        "note": "OpenSTA present but no liberty/netlist flow configured",
-    }
+from archzero.models import (
+    Candidate,
+    EvidenceLevel,
+    ProblemPackage,
+    TaskClass,
+    Tier,
+    TierResult,
+    Verdict,
+)
+from archzero.rtl.backend import RtlRequest, get_rtl_backend
+from archzero.rtl.codegen import DSL_PERSONA, api_digest, dof_prompt, ensure_baseline_link
+from archzero.rtl.equivalence import compare_commit_traces, optional_yosys_lec
 
 
 async def evaluate_tier5(
@@ -83,98 +35,199 @@ async def evaluate_tier5(
     work.mkdir(parents=True, exist_ok=True)
     candidate.workdir = str(work)
 
+    ensure_baseline_link(cfg, work)
+    digest = api_digest(cfg)
     instruction = (
         f"Mechanism: {candidate.title}\n{candidate.mechanism}\n\n"
-        f"Clauses:\n"
+        f"Problem: {problem.title}\n"
         + "\n".join(f"{c.id}: {c.text}" for c in problem.clauses)
-        + "\n\nWrite EQUIV_GATE.md, rtl_stub.v, DECISION.md."
+        + f"\n\n{dof_prompt(problem)}\n\n"
+        f"API DIGEST:\n{digest}\n\n"
+        "Write design.py, tb_design.py, EQUIV_GATE.md, DECISION.md."
     )
     try:
-        await llm.work(RTL_PERSONA, instruction, TaskClass.FINAL_JUDGE, cwd=work)
+        await llm.work(DSL_PERSONA, instruction, TaskClass.FINAL_JUDGE, cwd=work)
     except Exception as exc:  # noqa: BLE001
-        # Minimal stubs so the gate remains defined
         (work / "EQUIV_GATE.md").write_text(
             "# Equivalence gate (fixed)\n\n"
-            "Equivalence is defined at instruction **commit points** only. "
-            "Cycle-by-cycle ASL vs pipeline comparison is NOT required.\n"
+            "Equivalence is defined at instruction **commit points** only.\n"
             f"Agent error while drafting: {exc}\n",
             encoding="utf-8",
         )
-        (work / "rtl_stub.v").write_text(
-            "module mechanism_stub(input clk, input rst, output ready);\n"
-            "  assign ready = 1'b1;\nendmodule\n",
-            encoding="utf-8",
-        )
         (work / "DECISION.md").write_text(
-            f"# Decision log\n\nCandidate {candidate.id} — stubs after agent error.\n",
+            f"# Decision log\n\nCandidate {candidate.id} — agent error, no DSL.\n",
             encoding="utf-8",
         )
 
-    # Freeze equivalence gate: if exists, never regenerate content here
-    equiv = work / "EQUIV_GATE.md"
-    equiv_hash = equiv.read_text(encoding="utf-8")[:200] if equiv.exists() else ""
+    design = work / "design.py"
+    tb = work / "tb_design.py"
+    entry = tb if tb.is_file() else design
 
-    ppa: dict = {"yosys": None, "opensta": None, "proxy": None}
-    if _tool_available("yosys"):
-        ppa["yosys"] = _run_yosys(work)
-    else:
-        ppa["yosys"] = {"available": False}
-    ppa["opensta"] = _run_opensta(work)
+    rtl = get_rtl_backend(cfg)
+    tools: dict[str, str] = {}
 
-    # Proxy PPA from prior sim knobs / metrics when tools missing
-    if not ppa["yosys"].get("available"):
-        ppa["proxy"] = {
-            "area_mm2": candidate.metrics.get("t3_area_mm2")
-            or candidate.metrics.get("area")
-            or 0.3,
-            "note": "tooling unavailable — proxy from sim knobs",
-        }
-
-    tools_missing = not ppa["yosys"].get("available") and not ppa["opensta"].get(
-        "available"
-    )
-
-    # Pass if equivalence gate documented and area proxy within budget
-    area = None
-    if ppa.get("proxy"):
-        area = float(ppa["proxy"].get("area_mm2") or 0)
-    elif ppa["yosys"].get("area_cells") is not None:
-        area = float(ppa["yosys"]["area_cells"]) / 10000.0  # crude
-
-    area_ok = area is None or area <= 0.5
-    if tools_missing:
-        verdict = Verdict.UNAVAILABLE if not equiv.exists() else (
-            Verdict.PASS if area_ok else Verdict.FAIL
+    if not entry.is_file():
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=Verdict.FAIL,
+            score=0.0,
+            summary="Tier5: missing design.py / tb_design.py",
+            evidence=EvidenceLevel.RTL,
+            metrics={"error": "no DSL entry"},
+            clause_refs=candidate.clause_refs,
         )
-        # Treat documented gate + proxy OK as pass for funnel continuity
-        if equiv.exists() and area_ok:
-            verdict = Verdict.PASS
-        summary = "Tier5: PPA tools unavailable; used proxy + fixed equiv gate"
-    else:
-        yok = bool(ppa["yosys"].get("ok"))
-        verdict = Verdict.PASS if yok and area_ok else Verdict.FAIL
-        summary = f"Tier5: yosys_ok={yok} area_ok={area_ok}"
+        apply_llm_provenance(result, llm, prompt=instruction)
+        return attach_result(candidate, result, fail_message=result.summary)
 
-    # Write decision back hint
+    if not rtl.available():
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=Verdict.UNAVAILABLE,
+            score=0.0,
+            summary="Tier5: pyCircuit unavailable — run tools/setup_pycircuit.sh",
+            evidence=EvidenceLevel.RTL,
+            metrics={"rtl": "unavailable"},
+            tool_versions=tools,
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        return candidate
+
+    build = rtl.build(
+        RtlRequest(candidate_id=candidate.id, workdir=work, design_entry=entry)
+    )
+    tools.update(build.tool_versions)
+
+    if build.unavailable:
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=Verdict.UNAVAILABLE,
+            score=0.0,
+            summary=f"Tier5: RTL build unavailable — {build.log[:300]}",
+            evidence=EvidenceLevel.RTL,
+            metrics={
+                "build_ok": False,
+                "unavailable": True,
+                "log_tail": build.log[-1500:],
+            },
+            tool_versions=tools,
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        return candidate
+
+    if not build.ok:
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=Verdict.FAIL,
+            score=0.0,
+            summary="Tier5: pyCircuit build failed",
+            evidence=EvidenceLevel.RTL,
+            metrics={
+                "build_ok": False,
+                "log_tail": build.log[-1500:],
+                "compile_stats": build.compile_stats,
+            },
+            tool_versions=tools,
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        return attach_result(candidate, result, fail_message=result.summary)
+
+    # Equivalence: commit-point traces (primary)
+    equiv = compare_commit_traces(work)
+    tools.update(equiv.tool_versions)
+
+    lec = None
+    if cfg.rtl.optional_yosys_lec and build.verilog_files:
+        gold = work / "baseline_rtl"
+        gate = work / build.verilog_files[0]
+        # If baseline is a directory, skip LEC
+        if gold.is_file():
+            lec = optional_yosys_lec(work, gold, gate, enabled=True)
+            tools.update(lec.tool_versions)
+
+    if equiv.unavailable and (lec is None or lec.unavailable):
+        # Build succeeded but no equivalence evidence → UNAVAILABLE (not PASS)
+        verdict = Verdict.UNAVAILABLE
+        summary = (
+            "Tier5: build ok but equivalence evidence missing "
+            "(no commit traces; yosys LEC skipped/unavailable)"
+        )
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=verdict,
+            score=0.5,
+            summary=summary,
+            evidence=EvidenceLevel.RTL,
+            metrics={
+                "build_ok": True,
+                "verilog": build.verilog_files,
+                "compile_stats": build.compile_stats,
+                "equiv": equiv.__dict__,
+                "lec": lec.__dict__ if lec else None,
+            },
+            tool_versions=tools,
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        candidate.metrics["t5_rtl"] = result.metrics
+        return candidate
+
+    ok = equiv.ok if not equiv.unavailable else bool(lec and lec.ok)
+    if lec is not None and not lec.unavailable:
+        ok = ok and lec.ok
+
+    verdict = Verdict.PASS if ok else Verdict.FAIL
+    summary = f"Tier5: build_ok equiv={equiv.summary}"
+    if lec and not lec.unavailable:
+        summary += f" lec={lec.summary}"
+
     decision_path = work / "DECISION.md"
     if decision_path.exists():
         with decision_path.open("a", encoding="utf-8") as f:
-            f.write(
-                f"\n\n## Tier5 result\n\nverdict={verdict.value}\n"
-                f"ppa={json.dumps(ppa)[:2000]}\n"
-            )
+            f.write(f"\n\n## Tier5 result\n\nverdict={verdict.value}\n{summary}\n")
 
-    candidate.metrics["t5_ppa"] = ppa
-    candidate.metrics["t5_equiv_prefix"] = equiv_hash
+    metrics = {
+        "build_ok": True,
+        "verilog": build.verilog_files,
+        "compile_stats": build.compile_stats,
+        "manifest": build.manifest,
+        "equiv": {
+            "ok": equiv.ok,
+            "unavailable": equiv.unavailable,
+            "method": equiv.method,
+            "summary": equiv.summary,
+            "details": equiv.details,
+        },
+        "lec": (
+            {
+                "ok": lec.ok,
+                "unavailable": lec.unavailable,
+                "summary": lec.summary,
+            }
+            if lec
+            else None
+        ),
+    }
+    candidate.metrics["t5_rtl"] = metrics
     result = TierResult(
         tier=Tier.T5,
         verdict=verdict,
         score=1.0 if verdict == Verdict.PASS else 0.0,
         summary=summary,
-        metrics=ppa,
+        evidence=EvidenceLevel.RTL,
+        metrics=metrics,
+        tool_versions=tools,
         clause_refs=candidate.clause_refs,
     )
-    # UNAVAILABLE should not mark candidate failed hard
+    apply_llm_provenance(result, llm, prompt=instruction)
     if verdict == Verdict.UNAVAILABLE:
         candidate.tier_history.append(result)
         candidate.status = "active"

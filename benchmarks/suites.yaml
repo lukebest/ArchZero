@@ -1,0 +1,11 @@
+# ChampSim / gem5 suite definitions. Trace files live under benchmarks/traces/.
+suites:
+  small:
+    traces:
+      - demo_a.champsimtrace.xz
+      - demo_b.champsimtrace.xz
+  full:
+    traces:
+      - demo_a.champsimtrace.xz
+      - demo_b.champsimtrace.xz
+      - demo_c.champsimtrace.xz

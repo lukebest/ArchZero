@@ -7,6 +7,7 @@ import json
 import re
 
 from archzero.config import FactoryConfig
+from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.generation.personas import (
     default_review_personas,
@@ -14,7 +15,15 @@ from archzero.generation.personas import (
     load_synthesizer,
 )
 from archzero.llm.client import CursorLLM
-from archzero.models import Candidate, ProblemPackage, TaskClass, Tier, TierResult, Verdict
+from archzero.models import (
+    Candidate,
+    EvidenceLevel,
+    ProblemPackage,
+    TaskClass,
+    Tier,
+    TierResult,
+    Verdict,
+)
 
 
 def _parse_json(text: str) -> dict:
@@ -90,8 +99,9 @@ async def evaluate_tier1(
             "failure_modes": data.get("failure_modes") or [],
             "reviews": [r[:2000] for r in reviews],
         },
+        evidence=EvidenceLevel.ANALYTIC,
         clause_refs=list(data.get("clause_refs") or candidate.clause_refs),
     )
-    # Persist reviews into candidate workdir metrics reference
+    apply_llm_provenance(result, llm, prompt=synth_ctx)
     candidate.metrics["tier1_reviews"] = len(reviews)
     return attach_result(candidate, result, fail_message=result.summary)

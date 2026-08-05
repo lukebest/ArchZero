@@ -158,9 +158,11 @@ def ideate_cmd(
 @app.command("run")
 def run_cmd(
     ctx: typer.Context,
-    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    spec: Optional[Path] = typer.Option(
+        None, "--spec", exists=True, help="Problem package (required unless --resume)"
+    ),
     pdf: Optional[Path] = typer.Option(None, "--pdf", exists=True),
-    through: str = typer.Option("tier2", "--through", help="Stop after this tier"),
+    through: str = typer.Option("tier2", "--through", help="Stop after this tier (tier6=reserved)"),
     name: Optional[str] = typer.Option(None, "--name"),
     seed_dir: Optional[Path] = typer.Option(
         None, "--seed-dir", help="Directory of candidate markdown files"
@@ -176,15 +178,34 @@ def run_cmd(
         "--frontier-offline",
         help="Use deterministic theory scaffolds (no LLM) for frontier expansion",
     ),
+    resume: Optional[str] = typer.Option(
+        None, "--resume", help="Resume an existing campaign id"
+    ),
+    auto_round: int = typer.Option(
+        0, "--auto-round", help="After frontier: re-run funnel on expanded packages N times"
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None, "--max-tokens", help="Optional Cursor pool token ceiling for this process"
+    ),
 ) -> None:
     """Run the evaluation funnel on generated or seeded candidates."""
     from archzero.funnel.pipeline import run_campaign
+    from archzero.logging_util import setup_logging
 
+    setup_logging()
     cfg = _cfg(ctx.obj.get("config_path"))
+    if max_tokens is not None:
+        cfg.budget.cursor_pool_max_tokens = max_tokens
     try:
         through_tier = Tier(through)
     except ValueError as e:
         raise typer.BadParameter(f"unknown tier {through}") from e
+    if through_tier == Tier.T6:
+        console.print(
+            "[yellow]note[/yellow] Tier6 is reserved — candidates will get UNAVAILABLE"
+        )
+    if resume is None and spec is None:
+        raise typer.BadParameter("--spec is required unless --resume is set")
     result = asyncio.run(
         run_campaign(
             cfg,
@@ -196,6 +217,8 @@ def run_cmd(
             n_generate=n_generate,
             expand_frontier=expand_frontier,
             frontier_offline=frontier_offline,
+            resume_campaign_id=resume,
+            auto_round=auto_round,
         )
     )
     console.print(
@@ -209,6 +232,8 @@ def run_cmd(
             f"[green]frontier[/green] paradigms={fr.get('n_paradigm_candidates')} "
             f"kinds={fr.get('kinds')} report={fr.get('report_path')}"
         )
+    if result.get("auto_rounds"):
+        console.print(f"[green]auto-rounds[/green] {len(result['auto_rounds'])}")
 
 
 @app.command("frontier")
@@ -269,14 +294,64 @@ def evolve_cmd(
     ctx: typer.Context,
     campaign: str = typer.Option(..., "--campaign", help="Campaign id"),
     generations: Optional[int] = typer.Option(None, "--generations"),
+    reenter: bool = typer.Option(
+        True,
+        "--reenter/--no-reenter",
+        help="Re-enter evolved children through Tier0..reenter_through",
+    ),
 ) -> None:
     """Run evolutionary search on candidates that reached Tier2+."""
     from archzero.evolve.mapelites import run_evolution
 
     cfg = _cfg(ctx.obj.get("config_path"))
     gens = generations or cfg.evolve.generations
-    summary = asyncio.run(run_evolution(cfg, campaign_id=campaign, generations=gens))
+    summary = asyncio.run(
+        run_evolution(
+            cfg,
+            campaign_id=campaign,
+            generations=gens,
+            reenter=reenter,
+        )
+    )
     console.print(f"[green]evolve[/green] {summary}")
+
+
+@app.command("reproduce")
+def reproduce_cmd(
+    ctx: typer.Context,
+    bundle: Path = typer.Argument(..., exists=True, help="Exported bundle directory"),
+) -> None:
+    """Verify a reproducibility bundle and replay stub tier gates offline."""
+    from archzero.reproduce import reproduce_bundle
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    result = reproduce_bundle(cfg, bundle)
+    console.print(f"[green]reproduce[/green] {result}")
+
+
+@app.command("e2e")
+def e2e_cmd(
+    ctx: typer.Context,
+    spec: Path = typer.Option(
+        Path("specs/demo.md"), "--spec", exists=True, help="Problem package"
+    ),
+    through: str = typer.Option(
+        "tier5", "--through", help="End tier (default tier5; tier6 reserved)"
+    ),
+    offline: bool = typer.Option(
+        True, "--offline/--online", help="Use seed-demo style offline path when possible"
+    ),
+) -> None:
+    """End-to-end demo: one candidate from spec through Tier5 (Tier6 Planned)."""
+    from archzero.e2e import run_e2e
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    try:
+        through_tier = Tier(through)
+    except ValueError as e:
+        raise typer.BadParameter(f"unknown tier {through}") from e
+    result = asyncio.run(run_e2e(cfg, spec_path=spec, through=through_tier, offline=offline))
+    console.print(f"[green]e2e[/green] {result}")
 
 
 @app.command("report")

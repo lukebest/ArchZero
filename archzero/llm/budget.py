@@ -31,6 +31,18 @@ class BudgetGuard:
 
     def allow(self, pool: UsagePool) -> bool:
         if pool == UsagePool.CURSOR:
+            if (
+                self.cfg.cursor_pool_max_tokens > 0
+                and self._local_cursor_tokens >= self.cfg.cursor_pool_max_tokens
+            ):
+                self.denied.append("cursor_pool_max_tokens")
+                return False
+            if (
+                self.cfg.cursor_pool_max_calls > 0
+                and self._local_cursor_calls >= self.cfg.cursor_pool_max_calls
+            ):
+                self.denied.append("cursor_pool_max_calls")
+                return False
             return True
         if self._local_other_tokens >= self.cfg.other_pool_max_tokens:
             self.denied.append("other_pool_max_tokens")

@@ -12,3 +12,7 @@ build/
 *.log
 .DS_Store
 *.canvas.tsx
+.pycircuit_out/
+tools/champsim/
+benchmarks/traces/
+# vendor/pycircuit and vendor/openevolve are git submodules when present

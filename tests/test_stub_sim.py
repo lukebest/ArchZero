@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimRequest, get_backend

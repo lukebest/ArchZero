@@ -26,19 +26,20 @@ class PoolConfig(BaseModel):
     other_prefixes: list[str] = Field(
         default_factory=lambda: ["claude-", "gpt-", "gemini-", "o1-", "o3-", "o4-"]
     )
-    # Prefer these when available in catalog
     preferred_cursor: str = "cursor-grok-4.5-high-fast"
     preferred_other: str = "claude-4.6-sonnet"
     fallback_router: str = "auto-smart"
     fallback_auto: str = "auto"
     optimize_for: str = "balanced"
-    # Extra ModelSelection params applied on every call (id → value)
     model_params: dict[str, str] = Field(default_factory=dict)
 
 
 class BudgetConfig(BaseModel):
     other_pool_max_tokens: int = 2_000_000
     other_pool_max_calls: int = 200
+    # Cursor pool caps (0 = unlimited)
+    cursor_pool_max_tokens: int = 0
+    cursor_pool_max_calls: int = 0
     max_retries: int = 3
     concurrency: int = 4
 
@@ -50,6 +51,7 @@ class FunnelQuotas(BaseModel):
     tier3_keep: int = 8
     tier4_keep: int = 3
     tier5_keep: int = 2
+    tier6_keep: int = 2
 
     def keep_for(self, tier: Tier) -> int:
         return {
@@ -59,7 +61,19 @@ class FunnelQuotas(BaseModel):
             Tier.T3: self.tier3_keep,
             Tier.T4: self.tier4_keep,
             Tier.T5: self.tier5_keep,
+            Tier.T6: self.tier6_keep,
         }[tier]
+
+
+class FunnelConfig(BaseModel):
+    """Funnel policy knobs."""
+
+    # When True, T3+ refuse PASS if configured real backend is unavailable
+    strict_evidence: bool = True
+    # Tier2: require majority of ensemble runs (when ensemble_n > 1)
+    ensemble_n: int = 1
+    model_exec_timeout_s: int = 30
+    model_exec_mem_mb: int = 512
 
 
 class TaskRouting(BaseModel):
@@ -90,6 +104,25 @@ class SimConfig(BaseModel):
     champsim_bin: str | None = None
     gem5_bin: str | None = None
     traces_dir: str | None = None
+    suites_file: str | None = None  # path to suites.yaml
+
+
+class RtlConfig(BaseModel):
+    pycircuit_root: str | None = None  # vendor/pycircuit
+    pyc_toolchain_root: str | None = None
+    baseline_design: str = "coupled_l2"
+    require_verilator: bool = True
+    optional_yosys_lec: bool = True
+
+
+class SignConfig(BaseModel):
+    """Tier6 physical signoff — reserved; enabled=False until implemented."""
+
+    enabled: bool = False
+    yosys_bin: str | None = None
+    openroad_bin: str | None = None
+    pdk: str | None = None
+    liberty: str | None = None
 
 
 class EvolveConfig(BaseModel):
@@ -97,6 +130,7 @@ class EvolveConfig(BaseModel):
     islands: int = 3
     generations: int = 10
     population_per_island: int = 20
+    reenter_through: Tier = Tier.T2
     feature_dims: list[str] = Field(
         default_factory=lambda: ["family", "model_error", "speedup", "area_proxy"]
     )
@@ -105,21 +139,22 @@ class EvolveConfig(BaseModel):
 class FactoryConfig(BaseModel):
     state_dir: Path = DEFAULT_STATE_DIR
     personas_dir: Path = ROOT / "archzero" / "personas"
-    # Legacy alias (tests / old toml); if set, overrides personas_dir
     gauntlet_personas: Path | None = None
     cursor_api_key: str | None = None
     pools: PoolConfig = Field(default_factory=PoolConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     quotas: FunnelQuotas = Field(default_factory=FunnelQuotas)
+    funnel: FunnelConfig = Field(default_factory=FunnelConfig)
     routing: TaskRouting = Field(default_factory=TaskRouting)
     sim: SimConfig = Field(default_factory=SimConfig)
+    rtl: RtlConfig = Field(default_factory=RtlConfig)
+    sign: SignConfig = Field(default_factory=SignConfig)
     evolve: EvolveConfig = Field(default_factory=EvolveConfig)
-    cleanroom_n: int = 5  # independent generations per clean-room round
+    cleanroom_n: int = 5
     default_through: Tier = Tier.T2
 
     @property
     def personas_root(self) -> Path:
-        """Resolved personas directory (legacy gauntlet_personas wins if set)."""
         if self.gauntlet_personas is not None:
             return self.gauntlet_personas
         return self.personas_dir
@@ -158,15 +193,16 @@ class FactoryConfig(BaseModel):
             )
         return key.strip()
 
+    def resolved_pycircuit_root(self) -> Path:
+        if self.rtl.pycircuit_root:
+            return Path(self.rtl.pycircuit_root)
+        return ROOT / "vendor" / "pycircuit"
 
-def _deep_update(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    out = dict(base)
-    for k, v in overlay.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_update(out[k], v)
-        else:
-            out[k] = v
-    return out
+    def resolved_traces_dir(self) -> Path | None:
+        if self.sim.traces_dir:
+            return Path(self.sim.traces_dir)
+        default = ROOT / "benchmarks" / "traces"
+        return default if default.is_dir() else None
 
 
 def load_config(path: Path | None = None) -> FactoryConfig:
@@ -179,7 +215,6 @@ def load_config(path: Path | None = None) -> FactoryConfig:
         with cfg_path.open("rb") as f:
             data = tomllib.load(f)
 
-    # Flatten nested sections into pydantic fields
     flat: dict[str, Any] = {}
     for key in (
         "state_dir",
@@ -191,7 +226,17 @@ def load_config(path: Path | None = None) -> FactoryConfig:
     ):
         if key in data:
             flat[key] = data[key]
-    for section in ("pools", "budget", "quotas", "routing", "sim", "evolve"):
+    for section in (
+        "pools",
+        "budget",
+        "quotas",
+        "funnel",
+        "routing",
+        "sim",
+        "rtl",
+        "sign",
+        "evolve",
+    ):
         if section in data and isinstance(data[section], dict):
             flat[section] = data[section]
 
@@ -224,11 +269,12 @@ def write_default_config(path: Path | None = None) -> Path:
 [pools]
 preferred_cursor = "cursor-grok-4.5-high-fast"
 preferred_other = "claude-4.6-sonnet"
-# cursor_models = ["cursor-grok-4.5-high-fast", "cursor-grok-4.5", "composer-2.5"]
 
 [budget]
 other_pool_max_tokens = 2000000
 other_pool_max_calls = 200
+cursor_pool_max_tokens = 0
+cursor_pool_max_calls = 0
 concurrency = 4
 
 [quotas]
@@ -238,11 +284,24 @@ tier2_keep = 20
 tier3_keep = 8
 tier4_keep = 3
 tier5_keep = 2
+tier6_keep = 2
+
+[funnel]
+strict_evidence = true
+ensemble_n = 1
 
 [sim]
 backend = "stub"
-# champsim_bin = "/opt/champsim/bin/champsim"
-# gem5_bin = "/opt/gem5/build/X86/gem5.opt"
+# champsim_bin = "tools/champsim/bin/champsim"
+# traces_dir = "benchmarks/traces"
+
+[rtl]
+# pycircuit_root = "vendor/pycircuit"
+# pyc_toolchain_root = ".pycircuit_out/toolchain/install"
+
+[sign]
+enabled = false
+# Tier6 physical signoff reserved — not implemented yet
 
 [evolve]
 backend = "mapelites"

@@ -1,13 +1,25 @@
 # ArchZero
 
-面向计算机体系结构的 **自动化 Idea Factory**：对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），实现 Generation + Tier0–5 Evaluation 闭环。  
-**Feedback / 部署遥测层仅留接口，实现暂缓。**
+面向计算机体系结构的 **自动化 Idea Factory**：对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），实现 Generation + Tier0–5 Evaluation 闭环，并预留 Tier6 物理签核。  
+**Feedback / 部署遥测层仅留接口，实现暂缓。Tier6 签核仅预留，不执行 OpenROAD/sky130。**
 
 论文 PDF 与一页解读：[`docs/2604.03312v1.pdf`](docs/2604.03312v1.pdf) · [`docs/ArchAlphaZero-paper-post.html`](docs/ArchAlphaZero-paper-post.html)
 
 ---
 
-## 产品形态（已实现范围）
+## 成熟度矩阵
+
+| 层 | 状态 | 说明 |
+|----|------|------|
+| NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint |
+| Generation | Implemented | 读论文、clean-room、§5.1 frontier |
+| Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；写入 model_id / evidence |
+| Tier2 | Implemented | 沙箱执行 model.py；insight 与 meets_target 分歧则 FAIL |
+| Tier3 / Tier4 | Implemented / Stub | 默认 stub；ChampSim/gem5 解析真实指标；`strict_evidence` 禁止假 PASS |
+| Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator 等价性；工具缺失→UNAVAILABLE |
+| Tier6 Signoff | Planned (reserved) | 枚举/配置/`SignBackend` 骨架；`evaluate_tier6` 恒 UNAVAILABLE |
+| Evolution | Implemented | MAP-Elites 廉价解析评估 + 子代回流 T0–T2 |
+| Feedback 遥测 | Deferred | `NullFeedbackSource` 接口 only |
 
 ```
 ProblemPackage (NDF-lite)
@@ -16,20 +28,11 @@ ProblemPackage (NDF-lite)
 Comprehension → Clean-room Ideation → Frontier 扩题
         │
         ▼
-Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5
- 硬筛    对抗评审  解析模型  定向仿真  全仿真   RTL/PPA
+Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5 ⇢ Tier6(reserved)
+ 硬筛    对抗评审  解析模型  ChampSim  全仿真   pyCircuit RTL   物理签核
         │
-        └── Evolution (MAP-Elites / OpenEvolve 适配)
+        └── Evolution (MAP-Elites / OpenEvolve) → 回流漏斗
 ```
-
-| 层 | 状态 |
-|----|------|
-| 规范 NDF-lite | ✅ 条款 ID / lint / 决策日志 |
-| Generation | ✅ 读论文、clean-room 四阶段、三向扩题 |
-| Evaluation Tier0–5 | ✅（Tier3/4 默认 stub 仿真；ChampSim/gem5 即插） |
-| Evolution | ✅ 内置 MAP-Elites；OpenEvolve 经 OpenAI shim → Cursor SDK |
-| LLM | ✅ **仅 Cursor SDK**；池感知路由（Cursor Models 池优先） |
-| Feedback 遥测 | ⏸️ 接口 `archzero/feedback/source.py`，未实现 |
 
 ---
 
@@ -41,7 +44,37 @@ Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5
 
 ```bash
 export CURSOR_API_KEY="cursor_..."   # Dashboard → Integrations
-uv sync                              # 或: pip install -e ".[dev]"
+uv sync --extra dev                  # 或: pip install -e ".[dev]"
+```
+
+### 可选工具链（真实仿真 / RTL）
+
+```bash
+# ChampSim + 合成 demo traces
+bash tools/setup_champsim.sh
+python benchmarks/fetch_traces.py --synthetic
+
+# pyCircuit (LLVM 19 apt + pycc，建议 JOBS=2)
+bash tools/setup_pycircuit.sh
+```
+
+在 `archzero.toml` 中：
+
+```toml
+[sim]
+backend = "champsim"   # 或 stub / gem5
+champsim_bin = "tools/champsim/bin/champsim"
+traces_dir = "benchmarks/traces"
+
+[funnel]
+strict_evidence = true   # 真实后端不可用时 T3+ → UNAVAILABLE，绝不假 PASS
+
+[rtl]
+pycircuit_root = "vendor/pycircuit"
+pyc_toolchain_root = ".pycircuit_out/toolchain/install"
+
+[sign]
+enabled = false          # Tier6 reserved
 ```
 
 ### 2. 自检模型目录与池划分
@@ -97,6 +130,9 @@ uv run archzero next-questions --campaign <id>          # 失败回流成下一�
 uv run archzero frontier --spec specs/demo.md --offline # §5.1 纵向/横向/基础扩题 + 理论透镜
 uv run archzero run --spec specs/demo.md --n 5 \
   --expand-frontier --frontier-offline                  # 漏斗后自动范式扩题
+uv run archzero run --resume <campaign_id> --through tier3  # 断点续跑
+uv run archzero e2e --spec specs/demo.md --offline          # 离线演示到 Tier5
+uv run archzero reproduce bundles/<exported>/               # 校验可复现包 + stub 回放
 ```
 
 看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  

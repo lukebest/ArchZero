@@ -37,11 +37,13 @@ class ModelRouter:
         pool = self.catalog.classify(model_id)
         downgraded = False
 
-        if pool == UsagePool.OTHER and self.budget and not self.budget.allow(pool):
-            # Downgrade to cursor pool
-            model_id = self.catalog.pick_for_pool(UsagePool.CURSOR, available)
-            pool = UsagePool.CURSOR
-            downgraded = True
+        if self.budget and not self.budget.allow(pool):
+            if pool == UsagePool.OTHER:
+                # Downgrade to cursor pool
+                model_id = self.catalog.pick_for_pool(UsagePool.CURSOR, available)
+                pool = UsagePool.CURSOR
+                downgraded = True
+            # Cursor pool exhausted: still return selected model; caller sees denied
 
         optimize_for = None
         if model_id == "auto-smart":

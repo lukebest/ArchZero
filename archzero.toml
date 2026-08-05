@@ -17,9 +17,19 @@ tier2_keep = 20
 tier3_keep = 8
 tier4_keep = 3
 tier5_keep = 2
+tier6_keep = 2
+
+[funnel]
+strict_evidence = true
+ensemble_n = 1
 
 [sim]
 backend = "stub"
+
+[rtl]
+
+[sign]
+enabled = false
 
 [evolve]
 backend = "mapelites"

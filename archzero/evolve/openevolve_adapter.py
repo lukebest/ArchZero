@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
-from archzero.config import FactoryConfig, ROOT
+from archzero.config import ROOT, FactoryConfig
 from archzero.evolve.backend import EvolutionBackend
 from archzero.evolve.mapelites import MapElitesBackend
 from archzero.llm.shim import OpenAIShim

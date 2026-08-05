@@ -18,7 +18,6 @@ from archzero.models import (
     UsageEvent,
 )
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS problems (
   id TEXT PRIMARY KEY,
@@ -69,7 +68,14 @@ CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 """
+
+SCHEMA_VERSION = "2"
 
 
 def _dumps(obj: Any) -> str:
@@ -88,11 +94,18 @@ class Store:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
+                ("schema_version", SCHEMA_VERSION),
+            )
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
             conn.commit()

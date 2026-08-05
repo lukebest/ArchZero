@@ -1,12 +1,15 @@
-"""gem5 backend — enabled when binary is configured and present."""
+"""gem5 backend — parse stats.txt into shared SimMetrics."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimBackend, SimRequest, SimResult
+from archzero.sim.metrics import SimMetrics, compute_reduction
+from archzero.sim.parse_gem5 import parse_stats_txt
 from archzero.sim.stub import StubSimBackend
 
 
@@ -27,6 +30,7 @@ class Gem5Backend(SimBackend):
             result.backend = "gem5-unavailable→stub"
             result.unavailable = True
             result.metrics["note"] = "gem5 binary missing; used stub"
+            result.metrics["evidence"] = "stub"
             return result
 
         bin_path = Path(self.cfg.sim.gem5_bin)  # type: ignore[arg-type]
@@ -34,10 +38,20 @@ class Gem5Backend(SimBackend):
         if not script.exists():
             return SimResult(
                 ok=False,
-                metrics={"error": "missing run_gem5.py"},
+                metrics={"evidence": "sim", "error": "missing run_gem5.py"},
                 log="agent must write run_gem5.py",
                 backend="gem5",
+                unavailable=False,
             )
+
+        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
+        knob_path = req.workdir / "sim_knobs.json"
+        if knob_path.exists():
+            try:
+                knobs.update(json.loads(knob_path.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                pass
+
         try:
             proc = subprocess.run(
                 [str(bin_path), str(script)],
@@ -50,13 +64,53 @@ class Gem5Backend(SimBackend):
         except Exception as exc:  # noqa: BLE001
             return SimResult(
                 ok=False,
-                metrics={"error": str(exc)},
+                metrics={"evidence": "sim", "error": str(exc)},
                 log=str(exc),
                 backend="gem5",
             )
+
+        stats = parse_stats_txt(req.workdir / "stats.txt")
+        if not stats.get("mpki") and not stats.get("ipc"):
+            return SimResult(
+                ok=False,
+                metrics={
+                    "evidence": "sim",
+                    "returncode": proc.returncode,
+                    "error": "failed to parse stats.txt",
+                    "stdout_tail": proc.stdout[-2000:],
+                },
+                log=proc.stdout + "\n" + proc.stderr,
+                backend="gem5",
+            )
+
+        # Baseline may be recorded by agent as baseline_stats.txt
+        base = parse_stats_txt(req.workdir / "baseline_stats.txt")
+        reduction = compute_reduction(base.get("mpki"), stats.get("mpki"))
+        if reduction is None:
+            reduction = float(knobs.get("miss_reduction") or 0)
+
+        bw_delta = float(knobs.get("extra_bw", 0.02))
+        if base.get("dram_bw_gbps") and stats.get("dram_bw_gbps"):
+            b0 = float(base["dram_bw_gbps"])
+            if b0 > 0:
+                bw_delta = (float(stats["dram_bw_gbps"]) - b0) / b0
+
+        metrics = SimMetrics(
+            evidence="sim",
+            backend="gem5",
+            suite=req.suite,
+            baseline_mpki=base.get("mpki"),
+            mpki=stats.get("mpki"),
+            miss_reduction=reduction,
+            ipc=stats.get("ipc"),
+            bw_delta_frac=bw_delta,
+            area_mm2=float(knobs.get("area", 0.3)),
+            cycles=stats.get("cycles"),
+            extra={"returncode": proc.returncode},
+        )
         return SimResult(
-            ok=proc.returncode == 0,
-            metrics={"returncode": proc.returncode, "stdout_tail": proc.stdout[-2000:]},
+            ok=proc.returncode == 0 and metrics.gate_ok(),
+            metrics=metrics.as_dict(),
             log=proc.stdout + "\n" + proc.stderr,
             backend="gem5",
         )

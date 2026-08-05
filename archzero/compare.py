@@ -102,7 +102,7 @@ def compare_campaigns(cfg: FactoryConfig, a: str, b: str) -> dict[str, Any]:
 
 def format_compare_text(data: dict[str, Any]) -> str:
     lines = [
-        f"# Compare campaigns",
+        "# Compare campaigns",
         f"- A: `{data['a']['id']}` {data['a']['name']} (survivors={data['a']['survivors']})",
         f"- B: `{data['b']['id']}` {data['b']['name']} (survivors={data['b']['survivors']})",
         "",
