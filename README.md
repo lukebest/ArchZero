@@ -93,6 +93,9 @@ uv run archzero new-spec \
 uv run archzero export --campaign <id> --out bundles/   # 可复现产物包
 uv run archzero compare <campA> <campB>                 # 两轮漏斗 / 失败 taxonomy 对比
 uv run archzero next-questions --campaign <id>          # 失败回流成下一轮开放问题（Feedback 替身）
+uv run archzero frontier --spec specs/demo.md --offline # §5.1 纵向/横向/基础扩题 + 理论透镜
+uv run archzero run --spec specs/demo.md --n 5 \
+  --expand-frontier --frontier-offline                  # 漏斗后自动范式扩题
 ```
 
 看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  

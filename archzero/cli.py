@@ -166,6 +166,16 @@ def run_cmd(
         None, "--seed-dir", help="Directory of candidate markdown files"
     ),
     n_generate: int = typer.Option(10, "--n", help="Candidates to generate if no seed"),
+    expand_frontier: bool = typer.Option(
+        False,
+        "--expand-frontier/--no-expand-frontier",
+        help="After funnel: §5.1 vertical/lateral/foundational expansion from failures",
+    ),
+    frontier_offline: bool = typer.Option(
+        False,
+        "--frontier-offline",
+        help="Use deterministic theory scaffolds (no LLM) for frontier expansion",
+    ),
 ) -> None:
     """Run the evaluation funnel on generated or seeded candidates."""
     from archzero.funnel.pipeline import run_campaign
@@ -184,6 +194,8 @@ def run_cmd(
             name=name,
             seed_dir=seed_dir,
             n_generate=n_generate,
+            expand_frontier=expand_frontier,
+            frontier_offline=frontier_offline,
         )
     )
     console.print(
@@ -191,6 +203,65 @@ def run_cmd(
         f"passed={result['passed']} failed={result['failed']} "
         f"through={through}"
     )
+    if result.get("frontier"):
+        fr = result["frontier"]
+        console.print(
+            f"[green]frontier[/green] paradigms={fr.get('n_paradigm_candidates')} "
+            f"kinds={fr.get('kinds')} report={fr.get('report_path')}"
+        )
+
+
+@app.command("frontier")
+def frontier_cmd(
+    ctx: typer.Context,
+    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    campaign: Optional[str] = typer.Option(
+        None, "--campaign", help="Optional campaign whose failures become signals"
+    ),
+    out: Path = typer.Option(Path("frontiers"), "--out", "-o"),
+    offline: bool = typer.Option(
+        False, "--offline", help="Deterministic theory scaffolds (no LLM)"
+    ),
+) -> None:
+    """§5.1 paradigm expansion: vertical / lateral / foundational + theory lenses."""
+    from archzero.funnel.taxonomy import failures_as_signals
+    from archzero.generation.frontier import expand_frontier
+    from archzero.generation.theories import theory_catalog_markdown
+    from archzero.spec.ndf import load_problem_package
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    pp = load_problem_package(spec)
+    signals: list[str] = []
+    if campaign:
+        store = Store(cfg.db_path)
+        signals = failures_as_signals(store.list_failures(campaign_id=campaign))
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "THEORY_LENSES.md").write_text(theory_catalog_markdown(), encoding="utf-8")
+    result = asyncio.run(
+        expand_frontier(
+            cfg,
+            pp,
+            signals=signals,
+            out_dir=out,
+            offline=offline,
+        )
+    )
+    store = Store(cfg.db_path)
+    store.save_problem(pp)
+    for pkg in result["packages"]:
+        store.save_problem(pkg)
+    console.print(
+        f"[green]frontier[/green] wrote {len(result['packages'])} problem packages + "
+        f"{len(result['candidates'])} paradigm candidates → {out}"
+    )
+    for c in result["candidates"]:
+        console.print(
+            f"  • [{c.kind}] {c.title}  theories={','.join(c.theory_lenses) or '—'} "
+            f"novelty={c.score_novelty}"
+        )
+    if result.get("report_path"):
+        console.print(f"  report: {result['report_path']}")
 
 
 @app.command("evolve")
