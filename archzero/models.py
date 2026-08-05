@@ -43,6 +43,17 @@ class Tier(str, Enum):
     T3 = "tier3"
     T4 = "tier4"
     T5 = "tier5"
+    T6 = "tier6"  # physical signoff — reserved / not implemented yet
+
+
+class EvidenceLevel(str, Enum):
+    """How strongly a tier result is backed by real tooling."""
+
+    STUB = "stub"
+    ANALYTIC = "analytic"
+    SIM = "sim"
+    RTL = "rtl"
+    SIGNOFF = "signoff"  # reserved for Tier6
 
 
 class Verdict(str, Enum):
@@ -108,8 +119,12 @@ class TierResult(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     artifacts: list[str] = Field(default_factory=list)  # artifact hashes
     clause_refs: list[str] = Field(default_factory=list)
+    evidence: EvidenceLevel = EvidenceLevel.STUB
     model_id: str | None = None
     pool: UsagePool | None = None
+    prompt_hash: str | None = None
+    tool_versions: dict[str, str] = Field(default_factory=dict)
+    downgraded: bool = False
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -149,6 +164,14 @@ class Candidate(BaseModel):
         return self.tier_history[-1] if self.tier_history else None
 
     def passed_through(self, tier: Tier) -> bool:
+        """True if this candidate has a PASS or UNAVAILABLE result for the tier."""
+        return any(
+            t.tier == tier and t.verdict in {Verdict.PASS, Verdict.UNAVAILABLE}
+            for t in self.tier_history
+        )
+
+    def hard_passed(self, tier: Tier) -> bool:
+        """True only for a genuine PASS (not UNAVAILABLE)."""
         return any(t.tier == tier and t.verdict == Verdict.PASS for t in self.tier_history)
 
 

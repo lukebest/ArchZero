@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -15,6 +16,7 @@ from archzero.funnel.tier2 import evaluate_tier2
 from archzero.funnel.tier3 import evaluate_tier3
 from archzero.funnel.tier4 import evaluate_tier4
 from archzero.funnel.tier5 import evaluate_tier5
+from archzero.funnel.tier6 import evaluate_tier6
 from archzero.generation.cleanroom import cleanroom_ideate
 from archzero.llm.client import CursorLLM
 from archzero.models import (
@@ -28,12 +30,14 @@ from archzero.models import (
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
 
+log = logging.getLogger("archzero.funnel")
+
 TierFn = Callable[
     [FactoryConfig, Candidate, ProblemPackage, CursorLLM],
     Awaitable[Candidate],
 ]
 
-TIER_ORDER = [Tier.T0, Tier.T1, Tier.T2, Tier.T3, Tier.T4, Tier.T5]
+TIER_ORDER = [Tier.T0, Tier.T1, Tier.T2, Tier.T3, Tier.T4, Tier.T5, Tier.T6]
 
 TIER_FNS: dict[Tier, TierFn] = {
     Tier.T0: evaluate_tier0,
@@ -42,6 +46,7 @@ TIER_FNS: dict[Tier, TierFn] = {
     Tier.T3: evaluate_tier3,
     Tier.T4: evaluate_tier4,
     Tier.T5: evaluate_tier5,
+    Tier.T6: evaluate_tier6,
 }
 
 
@@ -77,10 +82,85 @@ def _load_seeds(seed_dir: Path, problem: ProblemPackage) -> list[Candidate]:
     return cands
 
 
+async def _run_tiers(
+    cfg: FactoryConfig,
+    store: Store,
+    campaign: Campaign,
+    problem: ProblemPackage,
+    llm: CursorLLM,
+    active: list[Candidate],
+    through: Tier,
+) -> list[Candidate]:
+    stop_idx = TIER_ORDER.index(through)
+    for tier in TIER_ORDER[: stop_idx + 1]:
+        keep = cfg.quotas.keep_for(tier)
+        fn = TIER_FNS[tier]
+
+        async def run_one(cand: Candidate, _fn=fn, _tier=tier) -> Candidate:
+            if cand.passed_through(_tier):
+                return cand
+            try:
+                out = await _fn(cfg, cand, problem, llm)
+                log.info(
+                    "tier_done",
+                    extra={
+                        "campaign_id": campaign.id,
+                        "candidate_id": cand.id,
+                        "tier": _tier.value,
+                        "status": out.status,
+                    },
+                )
+                return out
+            except Exception as exc:  # noqa: BLE001
+                from archzero.funnel.taxonomy import attach_result
+                from archzero.models import TierResult
+
+                return attach_result(
+                    cand,
+                    TierResult(
+                        tier=_tier,
+                        verdict=Verdict.FAIL,
+                        summary=f"exception: {exc}",
+                        score=0.0,
+                    ),
+                    fail_message=str(exc),
+                )
+
+        sem = asyncio.Semaphore(cfg.budget.concurrency)
+
+        async def guarded(c: Candidate) -> Candidate:
+            async with sem:
+                out = await run_one(c)
+                store.save_candidate(out, campaign_id=campaign.id)
+                for f in out.failures:
+                    store.save_failure(f)
+                return out
+
+        active = list(await asyncio.gather(*[guarded(c) for c in active]))
+
+        def _passed_tier(c: Candidate, t: Tier = tier) -> bool:
+            return c.passed_through(t)
+
+        passed = [c for c in active if _passed_tier(c)]
+
+        def score_of(c: Candidate) -> float:
+            for t in reversed(c.tier_history):
+                if t.tier == tier and t.score is not None:
+                    return t.score
+            return 0.0
+
+        passed.sort(key=score_of, reverse=True)
+        active = passed[:keep]
+        for c in active:
+            c.status = "active"
+            store.save_candidate(c, campaign_id=campaign.id)
+    return active
+
+
 async def run_campaign(
     cfg: FactoryConfig,
     *,
-    spec_path: Path,
+    spec_path: Path | None = None,
     pdf: Path | None = None,
     through: Tier = Tier.T2,
     name: str | None = None,
@@ -89,14 +169,60 @@ async def run_campaign(
     feedback: FeedbackSource | None = None,
     expand_frontier: bool = False,
     frontier_offline: bool = False,
+    resume_campaign_id: str | None = None,
+    auto_round: int = 0,
+    problem: ProblemPackage | None = None,
+    candidates_override: list[Candidate] | None = None,
 ) -> dict[str, Any]:
     cfg.ensure_dirs()
     store = Store(cfg.db_path)
-    problem = load_problem_package(spec_path)
+
+    if resume_campaign_id:
+        campaign = store.get_campaign(resume_campaign_id)
+        if campaign is None:
+            raise ValueError(f"unknown campaign: {resume_campaign_id}")
+        problem = store.get_problem(campaign.problem_id)
+        if problem is None:
+            raise ValueError(f"missing problem for campaign {resume_campaign_id}")
+        unique = store.list_candidates(campaign_id=campaign.id)
+        # Resume incomplete candidates (not hard-failed past through)
+        active_seed = [
+            c
+            for c in unique
+            if c.status in {"new", "active"} or not c.hard_passed(through)
+        ]
+        if not active_seed:
+            active_seed = unique
+        campaign.status = "running"
+        campaign.through_tier = through
+        store.save_campaign(campaign)
+        frontier_result: dict[str, Any] | None = None
+        async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
+            active = await _run_tiers(
+                cfg, store, campaign, problem, llm, active_seed, through
+            )
+            campaign.status = "done"
+            store.save_campaign(campaign)
+            all_c = store.list_candidates(campaign_id=campaign.id)
+            return {
+                "campaign_id": campaign.id,
+                "problem_id": problem.id,
+                "through": through.value,
+                "generated": len(unique),
+                "passed": sum(1 for c in all_c if c.hard_passed(through)),
+                "failed": sum(1 for c in all_c if c.status == "failed"),
+                "active": len(active),
+                "resumed": True,
+                "usage": store.usage_totals(campaign.id),
+            }
+
+    if problem is None:
+        if spec_path is None:
+            raise ValueError("spec_path or problem required")
+        problem = load_problem_package(spec_path)
     store.save_problem(problem)
 
     feedback = feedback or NullFeedbackSource()
-    # Hook point for telemetry (deferred)
     try:
         drift = feedback.drift_questions()
         if drift:
@@ -108,22 +234,23 @@ async def run_campaign(
         name=name or f"{problem.title} → {through.value}",
         problem_id=problem.id,
         through_tier=through,
-        meta={"expand_frontier": expand_frontier},
+        meta={"expand_frontier": expand_frontier, "auto_round": auto_round},
     )
     store.save_campaign(campaign)
 
-    frontier_result: dict[str, Any] | None = None
+    frontier_result = None
+    rounds_meta: list[dict[str, Any]] = []
 
     async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
-        # Generate or load seeds
-        if seed_dir and seed_dir.is_dir():
+        if candidates_override is not None:
+            candidates = candidates_override
+        elif seed_dir and seed_dir.is_dir():
             candidates = _load_seeds(seed_dir, problem)
         elif pdf is not None:
             candidates = await cleanroom_ideate(
                 cfg, pdf, problem=problem, n=n_generate, llm=llm
             )
         else:
-            # Spec-only synthetic ideation without PDF
             from archzero.generation.cleanroom import IDEATE_PERSONA, _parse_json
 
             candidates = []
@@ -162,102 +289,44 @@ async def run_campaign(
                     )
                 )
 
-        # Dedupe
         unique: list[Candidate] = []
         seen: set[str] = set()
+        allow_existing = candidates_override is not None
         for c in candidates:
             h = c.content_hash or _content_hash(c.title, c.mechanism)
             c.content_hash = h
-            if h in seen or store.find_by_hash(h):
+            if h in seen:
+                continue
+            if not allow_existing and store.find_by_hash(h):
                 continue
             seen.add(h)
-            work = cfg.scratch_dir / "campaigns" / campaign.id / c.id
-            work.mkdir(parents=True, exist_ok=True)
-            c.workdir = str(work)
+            if not c.workdir:
+                work = cfg.scratch_dir / "campaigns" / campaign.id / c.id
+                work.mkdir(parents=True, exist_ok=True)
+                c.workdir = str(work)
             store.save_candidate(c, campaign_id=campaign.id)
             unique.append(c)
 
-        # Run tiers
-        active = unique
-        stop_idx = TIER_ORDER.index(through)
-        for tier in TIER_ORDER[: stop_idx + 1]:
-            keep = cfg.quotas.keep_for(tier)
-            fn = TIER_FNS[tier]
+        active = await _run_tiers(cfg, store, campaign, problem, llm, unique, through)
 
-            async def run_one(cand: Candidate, _fn=fn, _tier=tier) -> Candidate:
-                # Resume: skip if already passed this tier
-                if cand.passed_through(_tier):
-                    return cand
-                try:
-                    return await _fn(cfg, cand, problem, llm)
-                except Exception as exc:  # noqa: BLE001
-                    from archzero.funnel.taxonomy import attach_result
-                    from archzero.models import TierResult
-
-                    return attach_result(
-                        cand,
-                        TierResult(
-                            tier=_tier,
-                            verdict=Verdict.FAIL,
-                            summary=f"exception: {exc}",
-                            score=0.0,
-                        ),
-                        fail_message=str(exc),
-                    )
-
-            # Concurrent evaluation
-            sem = asyncio.Semaphore(cfg.budget.concurrency)
-
-            async def guarded(c: Candidate) -> Candidate:
-                async with sem:
-                    out = await run_one(c)
-                    store.save_candidate(out, campaign_id=campaign.id)
-                    for f in out.failures:
-                        store.save_failure(f)
-                    return out
-
-            active = list(await asyncio.gather(*[guarded(c) for c in active]))
-
-            def _passed_tier(c: Candidate, t: Tier = tier) -> bool:
-                for tr in c.tier_history:
-                    if tr.tier == t and tr.verdict in {
-                        Verdict.PASS,
-                        Verdict.UNAVAILABLE,
-                    }:
-                        return True
-                return False
-
-            passed = [c for c in active if _passed_tier(c)]
-            # Rank by score
-            def score_of(c: Candidate) -> float:
-                for t in reversed(c.tier_history):
-                    if t.tier == tier and t.score is not None:
-                        return t.score
-                return 0.0
-
-            passed.sort(key=score_of, reverse=True)
-            active = passed[:keep]
-            for c in active:
-                c.status = "active"
-                store.save_candidate(c, campaign_id=campaign.id)
-
-        # §5.1: after the funnel, recycle failures into lateral/foundational expansions
-        if expand_frontier:
+        async def _do_frontier(pp: ProblemPackage) -> dict[str, Any]:
             from archzero.funnel.taxonomy import failures_as_signals
             from archzero.generation.frontier import expand_frontier as do_expand
 
             fails = store.list_failures(campaign_id=campaign.id)
             signals = failures_as_signals(fails)
             out_dir = cfg.scratch_dir / "campaigns" / campaign.id / "frontier"
-            frontier_result = await do_expand(
+            return await do_expand(
                 cfg,
-                problem,
+                pp,
                 signals=signals,
                 out_dir=out_dir,
                 llm=None if frontier_offline else llm,
                 offline=frontier_offline,
             )
-            # Register expanded problem packages for the next Generation round
+
+        if expand_frontier:
+            frontier_result = await _do_frontier(problem)
             for pp in frontier_result.get("packages") or []:
                 store.save_problem(pp)
             campaign.meta["frontier_report"] = frontier_result.get("report_path")
@@ -265,11 +334,34 @@ async def run_campaign(
                 c.id for c in (frontier_result.get("candidates") or [])
             ]
 
+            # Auto rounds: run funnel on expanded problem packages
+            for r in range(max(0, auto_round)):
+                packages = list(frontier_result.get("packages") or [])
+                if not packages:
+                    break
+                pp = packages[min(r, len(packages) - 1)]
+                round_name = f"{campaign.name} · frontier-round-{r + 1}"
+                sub = await run_campaign(
+                    cfg,
+                    problem=pp,
+                    through=through,
+                    name=round_name,
+                    n_generate=max(3, n_generate // 2),
+                    expand_frontier=False,
+                    auto_round=0,
+                )
+                rounds_meta.append(sub)
+                # Expand again from latest
+                if r + 1 < auto_round:
+                    frontier_result = await _do_frontier(pp)
+                    for npp in frontier_result.get("packages") or []:
+                        store.save_problem(npp)
+
         campaign.status = "done"
         store.save_campaign(campaign)
 
         all_c = store.list_candidates(campaign_id=campaign.id)
-        passed_n = sum(1 for c in all_c if c.passed_through(through))
+        passed_n = sum(1 for c in all_c if c.hard_passed(through))
         failed_n = sum(1 for c in all_c if c.status == "failed")
         result: dict[str, Any] = {
             "campaign_id": campaign.id,
@@ -287,8 +379,8 @@ async def run_campaign(
                 "n_packages": len(frontier_result.get("packages") or []),
                 "n_paradigm_candidates": len(frontier_result.get("candidates") or []),
                 "offline": frontier_result.get("offline"),
-                "kinds": [
-                    c.kind for c in (frontier_result.get("candidates") or [])
-                ],
+                "kinds": [c.kind for c in (frontier_result.get("candidates") or [])],
             }
+        if rounds_meta:
+            result["auto_rounds"] = rounds_meta
         return result

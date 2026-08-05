@@ -1,5 +1,5 @@
 from archzero.config import FactoryConfig
-from archzero.models import Candidate, Campaign, FailureKind, FailureRecord, Tier
+from archzero.models import Campaign, Candidate, FailureKind, FailureRecord, Tier
 from archzero.store.db import Store
 
 

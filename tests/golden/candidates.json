@@ -1,0 +1,20 @@
+[
+  {
+    "id": "gold-prefetch-filter",
+    "title": "Dead-block filtered prefetch",
+    "family": "prefetch",
+    "expect": {
+      "tier0": "pass",
+      "tier2_meets_target": true,
+      "tier3_stub_min_reduction": 0.10
+    }
+  },
+  {
+    "id": "gold-impossible-bw",
+    "title": "Infinite bandwidth oracle",
+    "family": "oracle",
+    "expect": {
+      "tier0": "fail"
+    }
+  }
+]

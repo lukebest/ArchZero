@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from archzero.models import FailureKind, FailureRecord, Tier, Verdict
-from archzero.models import Candidate, TierResult
+from archzero.models import Candidate, FailureKind, FailureRecord, Tier, TierResult, Verdict
 
 
 def classify_message(message: str, tier: Tier) -> FailureKind:

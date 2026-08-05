@@ -1,4 +1,4 @@
-"""Tier 4 — fuller simulation suite + final-judge adjudication (pool 2)."""
+"""Tier 4 — fuller simulation suite + final-judge adjudication."""
 
 from __future__ import annotations
 
@@ -7,9 +7,18 @@ import re
 from pathlib import Path
 
 from archzero.config import FactoryConfig
+from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.llm.client import CursorLLM
-from archzero.models import Candidate, ProblemPackage, TaskClass, Tier, TierResult, Verdict
+from archzero.models import (
+    Candidate,
+    EvidenceLevel,
+    ProblemPackage,
+    TaskClass,
+    Tier,
+    TierResult,
+    Verdict,
+)
 from archzero.sim.backend import SimRequest, get_backend
 
 JUDGE_PERSONA = """You are the final simulation adjudicator for an architecture funnel.
@@ -56,6 +65,27 @@ async def evaluate_tier4(
     )
     candidate.metrics.update({f"t4_{k}": v for k, v in sim.metrics.items()})
 
+    evidence = EvidenceLevel.STUB
+    if not sim.unavailable and cfg.sim.backend != "stub":
+        evidence = EvidenceLevel.SIM
+    if str(sim.metrics.get("evidence") or "") == "stub":
+        evidence = EvidenceLevel.STUB
+
+    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend != "stub":
+        result = TierResult(
+            tier=Tier.T4,
+            verdict=Verdict.UNAVAILABLE,
+            score=float(sim.metrics.get("miss_reduction") or 0),
+            summary=f"{sim.backend}: UNAVAILABLE under strict_evidence",
+            metrics=sim.metrics,
+            evidence=EvidenceLevel.STUB,
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        return candidate
+
     acc = "\n".join(
         f"{c.id}: {c.text}" for c in problem.clauses if c.id.startswith("ACC")
     )
@@ -63,20 +93,27 @@ async def evaluate_tier4(
         f"PROBLEM: {problem.title}\nACCEPTANCE:\n{acc}\n\n"
         f"CANDIDATE: {candidate.title}\n"
         f"SIM METRICS:\n{json.dumps(sim.metrics, indent=2)}\n"
-        f"backend={sim.backend} unavailable_flag={sim.unavailable}"
+        f"backend={sim.backend} unavailable_flag={sim.unavailable} evidence={evidence.value}"
     )
     try:
         data = _parse_json(
             await llm.complete(JUDGE_PERSONA, ctx, TaskClass.FINAL_JUDGE, expect_json=True)
         )
     except Exception as exc:  # noqa: BLE001
-        # Heuristic fallback
+        # Fail closed on judge error when not stub; stub uses heuristic
         reduction = float(sim.metrics.get("miss_reduction") or 0)
-        data = {
-            "verdict": "pass" if sim.ok and reduction >= 0.15 else "fail",
-            "summary": f"judge fallback: {exc}",
-            "score": reduction,
-        }
+        if evidence == EvidenceLevel.STUB and cfg.sim.backend == "stub":
+            data = {
+                "verdict": "pass" if sim.ok and reduction >= 0.15 else "fail",
+                "summary": f"judge fallback (stub): {exc}",
+                "score": reduction,
+            }
+        else:
+            data = {
+                "verdict": "fail",
+                "summary": f"judge error (fail-closed): {exc}",
+                "score": reduction,
+            }
 
     verdict = Verdict.PASS if str(data.get("verdict")).lower() == "pass" else Verdict.FAIL
     result = TierResult(
@@ -85,6 +122,8 @@ async def evaluate_tier4(
         score=float(data.get("score") or sim.metrics.get("miss_reduction") or 0),
         summary=str(data.get("summary") or ""),
         metrics=sim.metrics,
+        evidence=evidence,
         clause_refs=list(data.get("clause_refs") or candidate.clause_refs),
     )
+    apply_llm_provenance(result, llm, prompt=ctx)
     return attach_result(candidate, result, fail_message=result.summary)

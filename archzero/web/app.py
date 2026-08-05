@@ -205,7 +205,16 @@ def make_handler(cfg: FactoryConfig):
                         "product": "ArchZero Idea Factory",
                         "paper": "https://arxiv.org/abs/2604.03312",
                         "sim_backend": cfg.sim.backend,
+                        "strict_evidence": cfg.funnel.strict_evidence,
                         "telemetry": "deferred",
+                        "tier6": "planned_reserved",
+                        "evidence_levels": [
+                            "stub",
+                            "analytic",
+                            "sim",
+                            "rtl",
+                            "signoff",
+                        ],
                         "quickstart": "/quickstart.html",
                     },
                 )

@@ -13,7 +13,7 @@ from archzero.llm.budget import BudgetGuard
 from archzero.llm.catalog import ModelCatalog
 from archzero.llm.router import ModelRouter, RoutedModel
 from archzero.llm.transcript import TranscriptLog
-from archzero.models import TaskClass, UsageEvent, UsagePool
+from archzero.models import TaskClass, UsageEvent
 from archzero.store.db import Store
 
 
@@ -43,6 +43,7 @@ class CursorLLM:
         self.transcript = TranscriptLog(cfg.transcripts_dir)
         self._client: Any = None
         self._sem = asyncio.Semaphore(cfg.budget.concurrency)
+        self.last_routed: RoutedModel | None = None
 
     async def setup(self) -> None:
         await self.catalog.list_models()
@@ -117,6 +118,7 @@ class CursorLLM:
     ) -> str:
         """One-shot text completion: persona + context, no durable workspace edits."""
         routed = self.router.pick(task)
+        self.last_routed = routed
         prompt = (
             f"You are operating under the following persona / system instructions:\n\n"
             f"{persona.strip()}\n\n---\n\n{context.strip()}"
@@ -138,6 +140,7 @@ class CursorLLM:
     ) -> str:
         """Agentic work in a real cwd (write code, run commands)."""
         routed = self.router.pick(task)
+        self.last_routed = routed
         cwd.mkdir(parents=True, exist_ok=True)
         self._write_persona_rule(cwd, persona)
         prompt = (
@@ -193,10 +196,7 @@ class CursorLLM:
         model = self._model_selection(routed)
 
         try:
-            from cursor_sdk import (  # type: ignore
-                CursorAgentError,
-                LocalAgentOptions,
-            )
+            from cursor_sdk import LocalAgentOptions  # type: ignore
         except ImportError as exc:
             raise LLMError(
                 "cursor-sdk is not installed. Run: uv sync",

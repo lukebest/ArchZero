@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import json
 import re
-import runpy
-import traceback
 from pathlib import Path
 
+from archzero.analytic.sandbox import run_model_sandboxed
 from archzero.config import FactoryConfig
+from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.llm.client import CursorLLM
-from archzero.models import Candidate, ProblemPackage, TaskClass, Tier, TierResult, Verdict
+from archzero.models import (
+    Candidate,
+    EvidenceLevel,
+    ProblemPackage,
+    TaskClass,
+    Tier,
+    TierResult,
+    Verdict,
+)
 from archzero.store.artifacts import ArtifactStore
 
 SPEC_PERSONA = """You write analytic performance specifications for architecture mechanisms.
@@ -53,19 +61,6 @@ def _parse_json(text: str) -> dict:
         return {"verdict": "fail", "summary": text[:500], "score": 0.0}
 
 
-def _exec_model(path: Path) -> tuple[dict | None, str | None]:
-    try:
-        ns = runpy.run_path(str(path))
-        if "run_model" not in ns:
-            return None, "model.py missing run_model()"
-        result = ns["run_model"]()
-        if not isinstance(result, dict):
-            return None, "run_model() did not return dict"
-        return result, None
-    except Exception:  # noqa: BLE001
-        return None, traceback.format_exc()
-
-
 async def evaluate_tier2(
     cfg: FactoryConfig,
     candidate: Candidate,
@@ -105,7 +100,6 @@ async def evaluate_tier2(
                 TaskClass.ANALYTIC,
                 cwd=work,
             )
-            # Prefer file written by agent; else extract from response
             if not model_path.exists():
                 model_path.write_text(_extract_code(raw), encoding="utf-8")
         else:
@@ -114,7 +108,11 @@ async def evaluate_tier2(
                 f"You may use archzero.analytic.core helpers."
             )
             await llm.work(CODE_PERSONA, repair, TaskClass.ANALYTIC, cwd=work)
-        metrics, err = _exec_model(model_path)
+        metrics, err = run_model_sandboxed(
+            model_path,
+            timeout_s=cfg.funnel.model_exec_timeout_s,
+            mem_mb=cfg.funnel.model_exec_mem_mb,
+        )
         if metrics is not None:
             break
 
@@ -130,16 +128,19 @@ async def evaluate_tier2(
             summary=f"analytic model failed after repairs: {err}",
             metrics={"error": err},
             artifacts=[],
+            evidence=EvidenceLevel.ANALYTIC,
             clause_refs=candidate.clause_refs,
         )
+        apply_llm_provenance(result, llm, prompt=base)
         return attach_result(candidate, result, fail_message=result.summary)
 
-    # Phase 3: insight
+    # Phase 3: insight — no soft override from meets_target self-report
     insight_ctx = (
         base
         + f"\n\nMODEL METRICS:\n{json.dumps(metrics, indent=2)}\n"
         + f"\nSPEC:\n{spec_text[:8000]}"
     )
+    disagreement = False
     try:
         data = _parse_json(
             await llm.complete(
@@ -147,22 +148,38 @@ async def evaluate_tier2(
             )
         )
     except Exception as exc:  # noqa: BLE001
+        # Fail closed on insight errors — do not trust meets_target alone
         data = {
-            "verdict": "pass" if metrics.get("meets_target") else "fail",
-            "summary": f"insight fallback: {exc}",
+            "verdict": "fail",
+            "summary": f"insight error (fail-closed): {exc}",
             "score": float(metrics.get("miss_reduction") or 0),
         }
 
-    # Prefer executable truth if model reports meets_target
-    if metrics.get("meets_target") is True and str(data.get("verdict")).lower() != "pass":
-        # soft override toward pass if model says ok and score decent
-        if float(data.get("score") or 0) >= 0.4:
-            data["verdict"] = "pass"
+    insight_pass = str(data.get("verdict", "")).lower() == "pass"
+    model_ok = metrics.get("meets_target") is True
+    if insight_pass != model_ok:
+        disagreement = True
+        data["disagreement"] = {
+            "insight_pass": insight_pass,
+            "meets_target": metrics.get("meets_target"),
+        }
 
-    verdict = Verdict.PASS if str(data.get("verdict", "")).lower() == "pass" else Verdict.FAIL
-    # Also fail hard if model says not meeting target
+    # Majority / agreement: both must agree for PASS; model False always fails
     if metrics.get("meets_target") is False:
         verdict = Verdict.FAIL
+    elif insight_pass and model_ok:
+        verdict = Verdict.PASS
+    elif insight_pass and metrics.get("meets_target") is None:
+        # Model omitted meets_target — trust insight but annotate
+        verdict = Verdict.PASS
+        data["summary"] = str(data.get("summary") or "") + " [meets_target omitted]"
+    else:
+        verdict = Verdict.FAIL
+        if disagreement:
+            data["summary"] = (
+                str(data.get("summary") or "")
+                + " [disagreement: insight vs meets_target — fail]"
+            )
 
     candidate.metrics.update({f"t2_{k}": v for k, v in metrics.items()})
     result = TierResult(
@@ -170,8 +187,14 @@ async def evaluate_tier2(
         verdict=verdict,
         score=float(data.get("score") or metrics.get("miss_reduction") or 0.0),
         summary=str(data.get("summary") or ""),
-        metrics={"model": metrics, "magic_gap_notes": data.get("magic_gap_notes")},
+        metrics={
+            "model": metrics,
+            "magic_gap_notes": data.get("magic_gap_notes"),
+            "disagreement": disagreement,
+        },
         artifacts=[],
+        evidence=EvidenceLevel.ANALYTIC,
         clause_refs=list(data.get("clause_refs") or candidate.clause_refs),
     )
+    apply_llm_provenance(result, llm, prompt=insight_ctx)
     return attach_result(candidate, result, fail_message=result.summary)
