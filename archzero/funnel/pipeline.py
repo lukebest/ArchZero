@@ -87,6 +87,8 @@ async def run_campaign(
     seed_dir: Path | None = None,
     n_generate: int = 10,
     feedback: FeedbackSource | None = None,
+    expand_frontier: bool = False,
+    frontier_offline: bool = False,
 ) -> dict[str, Any]:
     cfg.ensure_dirs()
     store = Store(cfg.db_path)
@@ -106,8 +108,11 @@ async def run_campaign(
         name=name or f"{problem.title} → {through.value}",
         problem_id=problem.id,
         through_tier=through,
+        meta={"expand_frontier": expand_frontier},
     )
     store.save_campaign(campaign)
+
+    frontier_result: dict[str, Any] | None = None
 
     async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
         # Generate or load seeds
@@ -236,13 +241,37 @@ async def run_campaign(
                 c.status = "active"
                 store.save_candidate(c, campaign_id=campaign.id)
 
+        # §5.1: after the funnel, recycle failures into lateral/foundational expansions
+        if expand_frontier:
+            from archzero.funnel.taxonomy import failures_as_signals
+            from archzero.generation.frontier import expand_frontier as do_expand
+
+            fails = store.list_failures(campaign_id=campaign.id)
+            signals = failures_as_signals(fails)
+            out_dir = cfg.scratch_dir / "campaigns" / campaign.id / "frontier"
+            frontier_result = await do_expand(
+                cfg,
+                problem,
+                signals=signals,
+                out_dir=out_dir,
+                llm=None if frontier_offline else llm,
+                offline=frontier_offline,
+            )
+            # Register expanded problem packages for the next Generation round
+            for pp in frontier_result.get("packages") or []:
+                store.save_problem(pp)
+            campaign.meta["frontier_report"] = frontier_result.get("report_path")
+            campaign.meta["paradigm_candidates"] = [
+                c.id for c in (frontier_result.get("candidates") or [])
+            ]
+
         campaign.status = "done"
         store.save_campaign(campaign)
 
         all_c = store.list_candidates(campaign_id=campaign.id)
         passed_n = sum(1 for c in all_c if c.passed_through(through))
         failed_n = sum(1 for c in all_c if c.status == "failed")
-        return {
+        result: dict[str, Any] = {
             "campaign_id": campaign.id,
             "problem_id": problem.id,
             "through": through.value,
@@ -252,3 +281,14 @@ async def run_campaign(
             "active": len(active),
             "usage": store.usage_totals(campaign.id),
         }
+        if frontier_result is not None:
+            result["frontier"] = {
+                "report_path": frontier_result.get("report_path"),
+                "n_packages": len(frontier_result.get("packages") or []),
+                "n_paradigm_candidates": len(frontier_result.get("candidates") or []),
+                "offline": frontier_result.get("offline"),
+                "kinds": [
+                    c.kind for c in (frontier_result.get("candidates") or [])
+                ],
+            }
+        return result

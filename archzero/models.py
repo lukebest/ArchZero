@@ -19,7 +19,7 @@ def _uid(prefix: str = "") -> str:
 
 
 class UsagePool(str, Enum):
-    CURSOR = "cursor"  # pool 1: composer-2.5, cursor-grok-4.5
+    CURSOR = "cursor"  # pool 1: cursor-grok-4.5-high-fast, composer-2.5, …
     OTHER = "other"  # pool 2: third-party frontier models
 
 

@@ -26,7 +26,15 @@ KIND_PROMPTS = {
 }
 
 
-def questions_from_campaign(cfg: FactoryConfig, campaign_id: str, *, limit: int = 12) -> dict:
+def questions_from_campaign(
+    cfg: FactoryConfig,
+    campaign_id: str,
+    *,
+    limit: int = 12,
+    include_theory: bool = True,
+) -> dict:
+    from archzero.generation.theories import offline_theory_questions
+
     store = Store(cfg.db_path)
     camp = store.get_campaign(campaign_id)
     if camp is None:
@@ -46,6 +54,10 @@ def questions_from_campaign(cfg: FactoryConfig, campaign_id: str, *, limit: int 
             f"[{f.tier.value}/{f.kind.value}] Revisit after: {f.message[:160]}"
         )
 
+    if include_theory:
+        for row in offline_theory_questions(title=camp.name, limit_per_lens=1)[:4]:
+            questions.append(f"[§5.1/{row['theory']}] {row['question']}")
+
     # Deduplicate while preserving order
     seen: set[str] = set()
     uniq: list[str] = []
@@ -62,7 +74,10 @@ def questions_from_campaign(cfg: FactoryConfig, campaign_id: str, *, limit: int 
         "n_failures": len(fails),
         "taxonomy": dict(counts),
         "open_questions": uniq,
-        "note": "Offline stand-in for paper Feedback→Generation; telemetry still deferred.",
+        "note": (
+            "Offline stand-in for paper Feedback→Generation; telemetry still deferred. "
+            "Includes §5.1 theory-lens prompts for paradigm / cross-domain expansion."
+        ),
     }
 
 

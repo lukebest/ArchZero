@@ -86,7 +86,14 @@ class ModelCatalog:
     def classify(self, model_id: str) -> UsagePool:
         if model_id in self.cfg.pools.cursor_models:
             return UsagePool.CURSOR
-        if model_id in ("auto", "auto-smart", "composer-2", "composer-2.5", "cursor-grok-4.5"):
+        if model_id in (
+            "auto",
+            "auto-smart",
+            "composer-2",
+            "composer-2.5",
+            "cursor-grok-4.5",
+            "cursor-grok-4.5-high-fast",
+        ):
             return UsagePool.CURSOR
         for prefix in self.cfg.pools.other_prefixes:
             if model_id.startswith(prefix):
@@ -99,22 +106,34 @@ class ModelCatalog:
     def classify_all(self, models: list[ModelInfo]) -> dict[str, UsagePool]:
         return {m.id: self.classify(m.id) for m in models}
 
+    def _first_available(self, preferred: str, candidates: list[str], ids: set[str]) -> str:
+        if not ids or preferred in ids:
+            return preferred
+        # Variant → base: cursor-grok-4.5-high-fast → cursor-grok-4.5 → cursor-grok → …
+        parts = preferred.split("-")
+        for i in range(len(parts) - 1, 1, -1):
+            stem = "-".join(parts[:i])
+            if stem in ids:
+                return stem
+        for mid in candidates:
+            if mid in ids:
+                return mid
+        if "auto-smart" in ids:
+            return "auto-smart"
+        if "auto" in ids:
+            return "auto"
+        return preferred
+
     def pick_for_pool(
         self, pool: UsagePool, available: list[ModelInfo] | None = None
     ) -> str:
         ids = {m.id for m in (available or self._models or [])}
         if pool == UsagePool.CURSOR:
-            preferred = self.cfg.pools.preferred_cursor
-            if not ids or preferred in ids:
-                return preferred
-            for mid in self.cfg.pools.cursor_models:
-                if mid in ids:
-                    return mid
-            if "auto-smart" in ids:
-                return "auto-smart"
-            if "auto" in ids:
-                return "auto"
-            return preferred
+            return self._first_available(
+                self.cfg.pools.preferred_cursor,
+                list(self.cfg.pools.cursor_models),
+                ids,
+            )
         # OTHER
         preferred = self.cfg.pools.preferred_other
         if not ids or preferred in ids:

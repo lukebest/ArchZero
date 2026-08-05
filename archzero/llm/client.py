@@ -64,6 +64,8 @@ class CursorLLM:
             params.append(
                 ModelParameterValue(id="optimize_for", value=routed.optimize_for)
             )
+        for pid, pval in (self.cfg.pools.model_params or {}).items():
+            params.append(ModelParameterValue(id=pid, value=pval))
         if params:
             return ModelSelection(id=routed.model_id, params=params)
         return ModelSelection(id=routed.model_id)
