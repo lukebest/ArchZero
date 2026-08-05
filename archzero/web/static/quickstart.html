@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ArchZero · 研究员快速入门</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#1a1a1a; --muted:#5a5a5a; --line:#e5e5e5; --bg:#f4f2ec; --accent:#0b3d5c; --panel:#fffdf8; }
+  body { margin:0; font-family:"Noto Sans SC",system-ui,sans-serif; background:var(--bg); color:var(--ink); line-height:1.55; }
+  header { padding:2rem; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#e8f1f6,transparent); }
+  .brand { font-family:"Source Serif 4",Georgia,serif; font-size:2rem; font-weight:700; color:var(--accent); }
+  main { max-width:760px; margin:0 auto; padding:1.5rem 1.25rem 3rem; }
+  h2 { font-family:"IBM Plex Mono",monospace; font-size:0.85rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); margin:2rem 0 0.75rem; }
+  .card { background:var(--panel); border:1px solid var(--line); padding:1rem 1.1rem; margin:0.75rem 0; border-radius:3px; }
+  code, pre { font-family:"IBM Plex Mono",monospace; font-size:0.84rem; }
+  pre { background:#f7fafc; border:1px solid var(--line); padding:0.85rem; overflow:auto; }
+  a { color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:0.92rem; }
+  th, td { text-align:left; padding:0.45rem 0.35rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-family:"IBM Plex Mono",monospace; font-size:0.72rem; color:var(--muted); }
+  .note { color:var(--muted); font-size:0.9rem; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">ArchZero · 研究员快速入门</div>
+  <p class="note" style="margin:0.5rem 0 0;max-width:40rem">
+    对照论文 <em>Computer Architecture’s AlphaZero Moment</em>（arXiv:2604.03312）的 Idea Factory：
+    人定问题与约束，机器跑 Generation + Tier0–5 Evaluation。遥测 Feedback 暂缓。
+  </p>
+</header>
+<main>
+  <h2>一分钟路径（离线可玩）</h2>
+  <div class="card">
+<pre>export CURSOR_API_KEY=cursor_...   # 实跑 LLM 时需要；看板可先离线
+uv sync
+uv run archzero doctor
+uv run archzero seed-demo
+uv run archzero ui                 # http://127.0.0.1:8787/</pre>
+  </div>
+
+  <h2>论文三层 ↔ 本仓库命令</h2>
+  <div class="card">
+  <table>
+    <thead><tr><th>论文模块</th><th>你要做的事</th><th>命令</th></tr></thead>
+    <tbody>
+      <tr><td>规范 / 问题工厂</td><td>写清目标、约束、验收、自由度</td><td><code>new-spec</code> / <code>spec</code></td></tr>
+      <tr><td>Generation</td><td>读论文、clean-room 出机制</td><td><code>read</code> / <code>ideate</code></td></tr>
+      <tr><td>Evaluation Tier0–5</td><td>漏斗过闸</td><td><code>run --through tierN</code></td></tr>
+      <tr><td>Evolution</td><td>对可执行实现做多样性搜索</td><td><code>evolve --campaign</code></td></tr>
+      <tr><td>失败回流（Feedback 替身）</td><td>从失败taxonomy生成下一轮问题</td><td><code>next-questions</code></td></tr>
+      <tr><td>可复现产物</td><td>打包问题包+候选+报告</td><td><code>export</code></td></tr>
+      <tr><td>对比实验</td><td>两轮 campaign 漏斗对比</td><td><code>compare A B</code> / 看板勾选</td></tr>
+      <tr><td>部署遥测 Feedback</td><td>—</td><td><span class="note">暂缓</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>推荐工作流</h2>
+  <div class="card">
+    <ol>
+      <li><strong>出题</strong>：<code>new-spec</code> 或编辑 <code>specs/*.md</code>，条款 ID（CTX/REQ/ACC/DOF）保持稳定。</li>
+      <li><strong>生成</strong>：有 PDF 时 <code>ideate</code>；否则 <code>run --spec ... --n N</code> 直接从问题包出候选。</li>
+      <li><strong>漏斗</strong>：先 <code>--through tier2</code> 便宜过闸；需要仿真再开到 tier3/4（默认 stub）。</li>
+      <li><strong>看结果</strong>：<code>status</code> / <code>ui</code>；失败模式用 <code>next-questions</code> 回灌下一轮问题包。</li>
+      <li><strong>归档</strong>：<code>export --campaign</code> 留给组会或复现实验。</li>
+    </ol>
+  </div>
+
+  <h2>用量池提醒</h2>
+  <div class="card">
+    <p>所有 LLM 走 Cursor SDK。<strong>池1</strong>（composer / cursor-grok）扛高吞吐；
+    <strong>池2</strong>（Claude/GPT…）只用于合成与终审。<code>archzero models</code> 可自检路由。</p>
+  </div>
+
+  <p class="note"><a href="/">← 返回看板</a> · <a href="../docs/ArchAlphaZero-paper-post.html">论文一页解读</a>（若从仓库静态打开请用相对路径）</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ArchZero · Idea Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #5a5a5a;
+    --line: #e5e5e5;
+    --bg: #f4f2ec;
+    --panel: #fffdf8;
+    --accent: #0b3d5c;
+    --pass: #1f6b3a;
+    --fail: #8b2e2e;
+    --soft: #e8f1f6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Noto Sans SC", system-ui, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(900px 400px at 10% -10%, #dce9f2 0%, transparent 55%),
+      radial-gradient(700px 320px at 100% 0%, #efe6d6 0%, transparent 50%),
+      var(--bg);
+    min-height: 100vh;
+  }
+  header {
+    padding: 2rem 2rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  header .brand {
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  header p { margin: 0.4rem 0 0; color: var(--muted); max-width: 52rem; line-height: 1.5; }
+  main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 1.25rem;
+    padding: 1.25rem 2rem 2rem;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem;
+  }
+  h2 {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 0.75rem;
+  }
+  .camp {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 0.65rem 0.7rem;
+    margin-bottom: 0.35rem;
+    cursor: pointer;
+    border-radius: 3px;
+    font: inherit;
+  }
+  .camp:hover, .camp.active { background: var(--soft); border-color: #c5d8e4; }
+  .camp .name { font-weight: 600; display: block; }
+  .camp .meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.15rem; }
+  .funnel {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+  @media (max-width: 900px) {
+    .funnel { grid-template-columns: repeat(3, 1fr); }
+  }
+  .tier {
+    background: #f7fafc;
+    border: 1px solid var(--line);
+    padding: 0.7rem;
+    border-radius: 3px;
+  }
+  .tier .t { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: var(--accent); }
+  .tier .n { font-size: 1.4rem; font-weight: 700; margin: 0.2rem 0; }
+  .tier .s { font-size: 0.75rem; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+  .pill {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 2px;
+    background: #eee;
+  }
+  .pill.pass { background: #e3f4e8; color: var(--pass); }
+  .pill.fail { background: #f8e6e6; color: var(--fail); }
+  .empty { color: var(--muted); padding: 1.5rem 0; }
+  footer {
+    padding: 0 2rem 2rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+  a { color: var(--accent); }
+  #detail {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    display: none;
+  }
+  #detail pre {
+    white-space: pre-wrap;
+    background: #f7fafc;
+    border: 1px solid var(--line);
+    padding: 0.8rem;
+    font-size: 0.85rem;
+    max-height: 280px;
+    overflow: auto;
+  }
+  .failbars { margin: 0.5rem 0 1.25rem; }
+  .failrow { display: grid; grid-template-columns: 110px 1fr 2.5rem; gap: 0.5rem; align-items: center; margin: 0.35rem 0; font-size: 0.85rem; }
+  .failrow .bar { height: 0.55rem; background: #f0e4e4; border-radius: 2px; overflow: hidden; }
+  .failrow .bar > i { display: block; height: 100%; background: var(--fail); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">ArchZero</div>
+  <p>Idea Factory 看板 — Generation + Tier0–5 Evaluation（对照 arXiv:2604.03312）。遥测 Feedback 层暂缓。</p>
+</header>
+<main>
+  <aside class="panel">
+    <h2>Campaigns</h2>
+    <div id="campaigns"><div class="empty">加载中…</div></div>
+    <h2 style="margin-top:1.25rem">Compare</h2>
+    <p style="font-size:0.8rem;color:var(--muted);margin:0 0 0.5rem">勾选两个 campaign 对比漏斗</p>
+    <div id="compare-picks" style="font-size:0.85rem;color:var(--muted)">未选择</div>
+    <button id="compare-btn" class="camp" style="margin-top:0.5rem;border:1px solid var(--line)" disabled>运行对比</button>
+  </aside>
+  <section class="panel">
+    <div id="compare-panel" style="display:none;margin-bottom:1.25rem">
+      <h2>Campaign compare</h2>
+      <div id="compare-body"></div>
+    </div>
+    <h2>Funnel</h2>
+    <div id="funnel" class="funnel"><div class="empty">选择左侧 campaign</div></div>
+    <h2>Failure taxonomy</h2>
+    <div id="failures" class="failbars"><div class="empty">—</div></div>
+    <h2>Candidates</h2>
+    <div id="cands"><div class="empty">—</div></div>
+    <div id="detail">
+      <h2>Candidate detail</h2>
+      <div id="detail-body"></div>
+    </div>
+  </section>
+</main>
+<footer>
+  <span id="meta"></span>
+  · CLI: <code>archzero ui</code> ·
+  <a href="/quickstart.html">研究员快速入门</a> ·
+  <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noreferrer">paper</a>
+</footer>
+<script>
+async function j(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function pill(v) {
+  if (!v) return "";
+  const cls = v === "pass" ? "pass" : v === "fail" ? "fail" : "";
+  return `<span class="pill ${cls}">${v}</span>`;
+}
+
+const compareSel = [];
+
+function refreshComparePicks() {
+  const label = document.getElementById("compare-picks");
+  const btn = document.getElementById("compare-btn");
+  label.textContent = compareSel.length
+    ? compareSel.map((id, i) => `${i ? "B" : "A"}=${id}`).join(" · ")
+    : "未选择";
+  btn.disabled = compareSel.length !== 2;
+}
+
+async function loadCampaigns() {
+  const camps = await j("/api/campaigns");
+  const el = document.getElementById("campaigns");
+  if (!camps.length) {
+    el.innerHTML = '<div class="empty">尚无 campaign。<br/>离线示例：<code>archzero seed-demo</code><br/>或实跑：<code>archzero run --spec specs/demo.md</code></div>';
+    return;
+  }
+  el.innerHTML = camps.map(c => `
+    <div style="display:flex;gap:0.35rem;align-items:flex-start;margin-bottom:0.35rem">
+      <input type="checkbox" class="cmp" data-id="${c.id}" style="margin-top:0.85rem" />
+      <button class="camp" data-id="${c.id}" style="flex:1;margin:0">
+        <span class="name">${c.name}</span>
+        <span class="meta">${c.id} · ${c.n_candidates} candidates · ${c.status}</span>
+      </button>
+    </div>`).join("");
+  el.querySelectorAll("button.camp").forEach(btn => {
+    btn.addEventListener("click", () => {
+      el.querySelectorAll("button.camp").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      loadDetail(btn.dataset.id);
+    });
+  });
+  el.querySelectorAll("input.cmp").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.id;
+      if (cb.checked) {
+        if (compareSel.length >= 2) {
+          cb.checked = false;
+          return;
+        }
+        compareSel.push(id);
+      } else {
+        const i = compareSel.indexOf(id);
+        if (i >= 0) compareSel.splice(i, 1);
+      }
+      refreshComparePicks();
+    });
+  });
+  document.getElementById("compare-btn").onclick = runCompare;
+  el.querySelector("button.camp")?.click();
+}
+
+async function runCompare() {
+  if (compareSel.length !== 2) return;
+  const data = await j(`/api/compare?a=${encodeURIComponent(compareSel[0])}&b=${encodeURIComponent(compareSel[1])}`);
+  const panel = document.getElementById("compare-panel");
+  panel.style.display = "block";
+  const rows = data.funnel.map(r => `
+    <tr>
+      <td><code>${r.tier}</code></td>
+      <td>${r.a.passed}/${r.a.entered}</td>
+      <td>${r.b.passed}/${r.b.entered}</td>
+      <td>${r.pass_delta >= 0 ? "+" : ""}${r.pass_delta}</td>
+      <td>${r.fail_delta >= 0 ? "+" : ""}${r.fail_delta}</td>
+    </tr>`).join("");
+  const fails = (data.failures || []).map(r => `
+    <tr><td><code>${r.kind}</code></td><td>${r.a}</td><td>${r.b}</td><td>${r.delta >= 0 ? "+" : ""}${r.delta}</td></tr>`).join("");
+  document.getElementById("compare-body").innerHTML = `
+    <p style="font-size:0.9rem;color:var(--muted)">
+      <strong>A</strong> ${escapeHtml(data.a.name)} (survivors=${data.a.survivors}) ·
+      <strong>B</strong> ${escapeHtml(data.b.name)} (survivors=${data.b.survivors})
+    </p>
+    <table>
+      <thead><tr><th>tier</th><th>A pass/enter</th><th>B pass/enter</th><th>Δpass</th><th>Δfail</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <h2 style="margin-top:1rem">Failure Δ</h2>
+    <table>
+      <thead><tr><th>kind</th><th>A</th><th>B</th><th>Δ</th></tr></thead>
+      <tbody>${fails || '<tr><td colspan="4">无失败</td></tr>'}</tbody>
+    </table>`;
+}
+
+async function loadDetail(id) {
+  const data = await j(`/api/campaigns/${id}`);
+  document.getElementById("funnel").innerHTML = data.funnel.map(t => `
+    <div class="tier">
+      <div class="t">${t.tier}</div>
+      <div class="n">${t.passed}<span style="font-size:0.85rem;color:var(--muted)">/${t.entered}</span></div>
+      <div class="s">fail ${t.failed}</div>
+    </div>`).join("");
+
+  const counts = {};
+  (data.failures || []).forEach(f => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
+  const kinds = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  const maxF = kinds.length ? kinds[0][1] : 1;
+  document.getElementById("failures").innerHTML = kinds.length
+    ? kinds.map(([k,v]) => `
+      <div class="failrow">
+        <code>${k}</code>
+        <div class="bar"><i style="width:${(100*v/maxF).toFixed(0)}%"></i></div>
+        <span>${v}</span>
+      </div>`).join("")
+    : '<div class="empty">无失败记录</div>';
+
+  const rows = data.candidates.map(c => `
+    <tr data-cid="${c.id}" style="cursor:pointer">
+      <td><code>${c.id}</code></td>
+      <td><strong>${escapeHtml(c.title)}</strong><br/><span style="color:var(--muted);font-size:0.8rem">${escapeHtml(c.family)}</span></td>
+      <td>${c.last_tier || "—"} ${pill(c.last_verdict)}</td>
+      <td>${c.score ?? "—"}</td>
+      <td>${c.failures}</td>
+    </tr>`).join("");
+  document.getElementById("cands").innerHTML = rows
+    ? `<table><thead><tr><th>id</th><th>title</th><th>tier</th><th>score</th><th>fails</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">无候选</div>';
+
+  document.querySelectorAll("#cands tr[data-cid]").forEach(tr => {
+    tr.addEventListener("click", () => showCandidate(tr.dataset.cid));
+  });
+}
+
+async function showCandidate(id) {
+  const c = await j(`/api/candidates/${id}`);
+  const box = document.getElementById("detail");
+  box.style.display = "block";
+  document.getElementById("detail-body").innerHTML = `
+    <p><strong>${escapeHtml(c.title)}</strong> · ${pill(c.last_verdict)} · family <code>${escapeHtml(c.family)}</code></p>
+    <pre>${escapeHtml(c.mechanism_full || c.mechanism || "")}</pre>
+    <p style="color:var(--muted);font-size:0.85rem">条款引用: ${(c.clause_refs||[]).join(", ") || "—"}</p>
+  `;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  })[ch]);
+}
+
+(async () => {
+  try {
+    const meta = await j("/api/meta");
+    document.getElementById("meta").textContent =
+      `${meta.product} · sim=${meta.sim_backend} · telemetry=${meta.telemetry}`;
+    await loadCampaigns();
+  } catch (e) {
+    document.getElementById("campaigns").innerHTML =
+      `<div class="empty">无法连接 API：${escapeHtml(e.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

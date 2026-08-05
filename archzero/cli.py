@@ -1,4 +1,4 @@
-"""ArchZero CLI — models | spec | read | ideate | run | evolve | report."""
+"""ArchZero CLI — models | spec | new-spec | read | ideate | run | evolve | report | export."""
 
 from __future__ import annotations
 
@@ -220,6 +220,270 @@ def report_cmd(
     cfg = _cfg(ctx.obj.get("config_path"))
     path = write_report(cfg, campaign_id=campaign, out=out)
     console.print(f"[green]wrote[/green] {path}")
+
+
+@app.command("seed-demo")
+def seed_demo_cmd(
+    ctx: typer.Context,
+    force: bool = typer.Option(
+        False, "--force", help="Create another demo campaign even if one exists"
+    ),
+) -> None:
+    """Seed an offline demo campaign (no LLM) so the funnel UI has sample data."""
+    from archzero.demo_seed import seed_demo_campaign
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    result = seed_demo_campaign(cfg, force=force)
+    if result["created"]:
+        console.print(
+            f"[green]seeded[/green] campaign {result['campaign_id']} "
+            f"({result['n_candidates']} candidates)"
+        )
+    else:
+        console.print(
+            f"[yellow]exists[/yellow] campaign {result['campaign_id']} — {result['note']}"
+        )
+    console.print(
+        f"Inspect: [bold]archzero status {result['campaign_id']}[/bold]  ·  "
+        f"[bold]archzero ui[/bold]"
+    )
+
+
+@app.command("doctor")
+def doctor_cmd(
+    ctx: typer.Context,
+) -> None:
+    """Check API key, personas, sim backend, and other run prerequisites."""
+    from archzero.doctor import run_doctor
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    checks = run_doctor(cfg)
+    table = Table(title="ArchZero doctor")
+    table.add_column("check")
+    table.add_column("ok")
+    table.add_column("detail")
+    hard_fail = False
+    for c in checks:
+        mark = "[green]yes[/green]" if c.ok else "[red]no[/red]"
+        if not c.ok and c.severity == "error":
+            hard_fail = True
+        table.add_row(c.name, mark, c.detail)
+    console.print(table)
+    if hard_fail:
+        console.print(
+            "[yellow]Fix errors above before running a live campaign "
+            "(stub-only / offline inspect commands still work).[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command("campaigns")
+def campaigns_cmd(
+    ctx: typer.Context,
+) -> None:
+    """List Idea Factory campaigns and candidate counts."""
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+    camps = store.list_campaigns()
+    if not camps:
+        console.print("[dim]No campaigns yet. Try:[/dim] archzero run --spec specs/demo.md")
+        return
+    table = Table(title="Campaigns")
+    table.add_column("id")
+    table.add_column("name")
+    table.add_column("status")
+    table.add_column("through")
+    table.add_column("candidates")
+    for c in camps:
+        n = len(store.list_candidates(campaign_id=c.id))
+        table.add_row(c.id, c.name, c.status, c.through_tier.value, str(n))
+    console.print(table)
+
+
+@app.command("status")
+def status_cmd(
+    ctx: typer.Context,
+    campaign: str = typer.Argument(..., help="Campaign id"),
+) -> None:
+    """Show funnel throughput for one campaign (researcher snapshot)."""
+    from archzero.models import Tier, Verdict
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+    camp = store.get_campaign(campaign)
+    if not camp:
+        console.print(f"[red]unknown campaign[/red] {campaign}")
+        raise typer.Exit(code=1)
+    cands = store.list_candidates(campaign_id=campaign)
+    console.print(
+        f"[bold]{camp.name}[/bold]  id={camp.id}  status={camp.status}  "
+        f"through={camp.through_tier.value}  candidates={len(cands)}"
+    )
+    table = Table(title="Funnel")
+    table.add_column("tier")
+    table.add_column("entered", justify="right")
+    table.add_column("passed", justify="right")
+    table.add_column("failed", justify="right")
+    for tier in Tier:
+        entered = passed = failed = 0
+        for c in cands:
+            for tr in c.tier_history:
+                if tr.tier != tier:
+                    continue
+                entered += 1
+                if tr.verdict == Verdict.PASS:
+                    passed += 1
+                elif tr.verdict == Verdict.FAIL:
+                    failed += 1
+        table.add_row(tier.value, str(entered), str(passed), str(failed))
+    console.print(table)
+    usage = store.usage_totals(campaign)
+    if usage:
+        console.print(f"usage pools: {usage}")
+
+
+@app.command("show")
+def show_cmd(
+    ctx: typer.Context,
+    candidate_id: str = typer.Argument(..., help="Candidate id"),
+) -> None:
+    """Show one candidate: mechanism, tier history, failures, clause refs."""
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+    c = store.get_candidate(candidate_id)
+    if not c:
+        console.print(f"[red]unknown candidate[/red] {candidate_id}")
+        raise typer.Exit(code=1)
+    console.print(f"[bold]{c.title}[/bold]  ({c.family})  status={c.status}")
+    console.print(f"id={c.id}  problem={c.problem_id}")
+    if c.clause_refs:
+        console.print("clauses: " + ", ".join(c.clause_refs))
+    console.print("\n[bold]Mechanism[/bold]\n")
+    console.print(c.mechanism[:4000] + ("…" if len(c.mechanism) > 4000 else ""))
+    if c.tier_history:
+        table = Table(title="Tier history")
+        table.add_column("tier")
+        table.add_column("verdict")
+        table.add_column("score")
+        table.add_column("summary")
+        for t in c.tier_history:
+            table.add_row(
+                t.tier.value,
+                t.verdict.value,
+                "" if t.score is None else f"{t.score:.3f}",
+                (t.summary or "")[:120],
+            )
+        console.print(table)
+    if c.failures:
+        console.print("\n[bold]Failures[/bold]")
+        for f in c.failures:
+            console.print(f"  [{f.tier.value}/{f.kind.value}] {f.message}")
+
+
+@app.command("ui")
+def ui_cmd(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8787, "--port"),
+) -> None:
+    """Open the local researcher dashboard (funnel / campaigns / candidates)."""
+    from archzero.web.app import serve
+
+    cfg_path = ctx.obj.get("config_path")
+    serve(host=host, port=port, config=cfg_path)
+
+
+@app.command("new-spec")
+def new_spec_cmd(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title", help="Problem title"),
+    workload: str = typer.Option(..., "--workload", help="Workload / suite description"),
+    symptom: str = typer.Option(..., "--symptom", help="Observed bottleneck / symptom"),
+    constraint: str = typer.Option(..., "--constraint", help="Hardware / resource constraint"),
+    out: Path = typer.Option(Path("specs"), "--out", "-o", help="Output directory"),
+) -> None:
+    """Scaffold an NDF-lite problem package from researcher fields, then lint."""
+    from archzero.spec.lint import lint_package
+    from archzero.spec.ndf import load_problem_package
+    from archzero.spec.wizard import scaffold_problem
+
+    path = scaffold_problem(
+        title=title,
+        workload=workload,
+        symptom=symptom,
+        constraint=constraint,
+        out_dir=out,
+    )
+    pp = load_problem_package(path)
+    issues = lint_package(pp)
+    console.print(f"[green]wrote[/green] {path}")
+    if issues:
+        for i in issues:
+            console.print(f"[yellow]lint[/yellow] {i}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]lint ok[/green] ({len(pp.clauses)} clauses) — {pp.id}")
+
+
+@app.command("export")
+def export_cmd(
+    ctx: typer.Context,
+    campaign: str = typer.Option(..., "--campaign", help="Campaign id"),
+    out: Path = typer.Option(Path("bundles"), "--out", "-o", help="Bundle parent directory"),
+) -> None:
+    """Export a campaign as a reproducibility bundle (manifest, problem, candidates, report)."""
+    from archzero.export_bundle import export_campaign_bundle
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    root = export_campaign_bundle(cfg, campaign, out)
+    console.print(f"[green]exported[/green] {root}")
+
+
+@app.command("compare")
+def compare_cmd(
+    ctx: typer.Context,
+    a: str = typer.Argument(..., help="Campaign A id"),
+    b: str = typer.Argument(..., help="Campaign B id"),
+    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write markdown report"),
+) -> None:
+    """Compare funnel throughput and failure taxonomy of two campaigns."""
+    from archzero.compare import compare_campaigns, format_compare_text
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    data = compare_campaigns(cfg, a, b)
+    text = format_compare_text(data)
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        console.print(f"[green]wrote[/green] {out}")
+    else:
+        console.print(text)
+
+
+@app.command("next-questions")
+def next_questions_cmd(
+    ctx: typer.Context,
+    campaign: str = typer.Option(..., "--campaign", help="Campaign id"),
+    out: Path = typer.Option(
+        Path("next_questions.md"), "--out", "-o", help="Markdown output path"
+    ),
+) -> None:
+    """Derive next Generation open questions from structured failures (offline Feedback stand-in)."""
+    from archzero.next_questions import questions_from_campaign, write_questions_markdown
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    payload = questions_from_campaign(cfg, campaign)
+    path = write_questions_markdown(payload, out)
+    console.print(
+        f"[green]wrote[/green] {path}  ({len(payload['open_questions'])} questions "
+        f"from {payload['n_failures']} failures)"
+    )
+    for q in payload["open_questions"][:5]:
+        console.print(f"  • {q}")
 
 
 @app.command("version")

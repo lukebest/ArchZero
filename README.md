@@ -75,6 +75,29 @@ uv run archzero run --spec specs/demo.md --pdf path/to/paper.pdf --through tier4
 uv run archzero evolve --campaign <campaign_id>
 ```
 
+### 4. 研究员日常查看
+
+```bash
+uv run archzero doctor                 # API key / personas / sim 前置检查
+uv run archzero seed-demo              # 离线示例 campaign（无需 LLM，立刻可看漏斗）
+uv run archzero campaigns              # 列出 campaign
+uv run archzero status <campaign_id>   # 漏斗吞吐快照
+uv run archzero show <candidate_id>    # 机制全文 + tier 历史 + 失败归因
+uv run archzero ui                     # 本地看板 http://127.0.0.1:8787/
+uv run archzero new-spec \
+  --title "LLM Decode Bandwidth" \
+  --workload "Llama-70B decode" \
+  --symptom "L2 MPKI spikes" \
+  --constraint "<=0.5mm^2" \
+  --out specs/                       # 脚手架生成 NDF-lite 问题包并 lint
+uv run archzero export --campaign <id> --out bundles/   # 可复现产物包
+uv run archzero compare <campA> <campB>                 # 两轮漏斗 / 失败 taxonomy 对比
+uv run archzero next-questions --campaign <id>          # 失败回流成下一轮开放问题（Feedback 替身）
+```
+
+看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  
+中文快速入门：[`docs/researcher-quickstart.html`](docs/researcher-quickstart.html)（或 `archzero ui` 后打开 `/quickstart.html`）。
+
 ---
 
 ## 仓库结构
@@ -91,6 +114,8 @@ archzero/           # 产品代码
   feedback/         # 遥测接口（暂缓）
   report/           # 周级漏斗报告
   store/            # SQLite + 内容寻址产物
+  web/              # 本地研究员看板（stdlib HTTP + 单页 UI）
+  doctor.py         # 运行前环境自检
 specs/demo.md       # 示例问题包
 Gauntlet/           # submodule：只读复用人设与协议
 docs/analysis-*.md  # 与外部仓库对照分析
