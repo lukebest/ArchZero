@@ -50,8 +50,9 @@ uv sync                              # 或: pip install -e ".[dev]"
 uv run archzero models
 ```
 
-- **池 1 Cursor Models**（含量充裕）：`composer-2.5`、`cursor-grok-4.5` — 高吞吐（Tier0、进化、解析修复…）
-- **池 2 Other Models**（按 API 计价）：Claude / GPT / Gemini… — 低频高价值（Tier1 合成、规格、终审）
+- **默认模型**：全部 Task 默认走池 1 的 `cursor-grok-4.5-high-fast`（可在 `archzero.toml` `[pools].preferred_cursor` 改）
+- **池 1 Cursor Models**（含量充裕）：`cursor-grok-4.5-high-fast`、`cursor-grok-4.5`、`composer-2.5`
+- **池 2 Other Models**（按 API 计价）：Claude / GPT / Gemini… — 仅在 `routing.routes` 显式指向 `other` 时使用
 
 ### 3. 注册问题包并跑漏斗
 
