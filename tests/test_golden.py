@@ -12,7 +12,6 @@ from archzero.models import Candidate, Verdict
 from archzero.sim.metrics import SimMetrics
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
-
 GOLDEN_PATH = Path(__file__).parent / "golden" / "candidates.json"
 
 

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from archzero.models import Campaign, FailureKind, FailureRecord, Tier, Candidate
 from archzero.metrics.elimination import compute_elimination
+from archzero.models import Campaign, Candidate, FailureKind, FailureRecord, Tier
 from archzero.report.weekly import build_report
 from archzero.sim.generate import generate_dedicated_sim
 from archzero.store.db import Store

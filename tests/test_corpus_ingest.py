@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from archzero.corpus.ingest import add_paper_pdf
 from archzero.corpus.status import corpus_status
 

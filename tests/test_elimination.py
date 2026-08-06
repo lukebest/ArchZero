@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from archzero.metrics.elimination import compute_elimination, snapshot_failures
 from archzero.models import (
-    Candidate,
     Campaign,
+    Candidate,
     FailureKind,
     FailureRecord,
     Tier,
