@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 from archzero.config import ROOT, FactoryConfig
 from archzero.sim.backend import get_backend

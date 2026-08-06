@@ -6,8 +6,8 @@ from collections import Counter
 from typing import Any
 
 from archzero.config import FactoryConfig
-from archzero.models import Tier, Verdict
 from archzero.metrics.elimination import compute_elimination
+from archzero.models import Tier, Verdict
 from archzero.store.db import Store
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from archzero.config import FactoryConfig
 from archzero.feedback.source import FeedbackSource, NullFeedbackSource
+from archzero.funnel.dedup import dedup_candidates
 from archzero.funnel.tier0 import evaluate_tier0
 from archzero.funnel.tier1 import evaluate_tier1
 from archzero.funnel.tier2 import evaluate_tier2
@@ -28,7 +28,6 @@ from archzero.models import (
     Verdict,
 )
 from archzero.spec.ndf import load_problem_package
-from archzero.funnel.dedup import dedup_candidates
 from archzero.store.db import Store
 
 log = logging.getLogger("archzero.funnel")
