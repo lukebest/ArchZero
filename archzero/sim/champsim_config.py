@@ -8,6 +8,7 @@ runs have an explicit mechanism→simulator contract before empirics.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -116,9 +117,49 @@ def render_patch_markdown(
         "2. Point `champsim_config.json` L2C module names at those sources.\n"
         "3. `JOBS=2 bash tools/setup_champsim.sh` (or rebuild binary).\n"
         "4. Re-run Tier3 with `sim.backend = champsim`.\n\n"
-        "_This file is scaffolding — not evidence of a compiled mechanism._\n"
+        "_This file is scaffolding — not evidence of a compiled mechanism._\n\n## Source stubs\n\nSee `champsim_src/` for family-specific `.cc`/`.h` templates to copy into ChampSim.\n"
     )
 
+
+
+
+def _templates_dir() -> Path:
+    return Path(__file__).resolve().parent / "templates" / "champsim"
+
+
+def emit_source_templates(
+    workdir: Path,
+    *,
+    family: str | None,
+    overwrite: bool = False,
+) -> list[str]:
+    """Copy family-specific .cc/.h scaffolds into workdir/champsim_src/."""
+    fam = (family or "unclassified").lower()
+    mapping = {
+        "prefetch": ["archzero_filter.h", "archzero_filter.cc"],
+        "replacement": ["archzero_rrpv.h", "archzero_rrpv.cc"],
+    }
+    names = mapping.get(fam, [])
+    if not names:
+        return []
+    src_root = _templates_dir()
+    dest_root = Path(workdir) / "champsim_src"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for name in names:
+        src = src_root / name
+        if not src.is_file():
+            continue
+        dest = dest_root / name
+        if overwrite or not dest.exists():
+            shutil.copy2(src, dest)
+        written.append(str(dest.relative_to(workdir)))
+    readme_src = src_root / "README.md"
+    readme_dst = dest_root / "README.md"
+    if readme_src.is_file() and (overwrite or not readme_dst.exists()):
+        shutil.copy2(readme_src, readme_dst)
+        written.append(str(readme_dst.relative_to(workdir)))
+    return written
 
 def write_champsim_scaffold(
     workdir: Path,
@@ -162,6 +203,10 @@ def write_champsim_scaffold(
             encoding="utf-8",
         )
 
+    sources = emit_source_templates(
+        workdir, family=str(patch_meta["family"]), overwrite=overwrite
+    )
+
     return {
         "ok": True,
         "config": str(config_path),
@@ -169,4 +214,5 @@ def write_champsim_scaffold(
         "patch_md": str(md_path),
         "family": patch_meta["family"],
         "module": patch_meta["module"],
+        "sources": sources,
     }

@@ -21,3 +21,5 @@ def test_write_champsim_scaffold(tmp_path):
     assert cfg["ooo_cpu"][0]["L2C"]["prefetcher"] == "archzero_filter"
     assert (tmp_path / "MECHANISM_PATCH.md").is_file()
     assert (tmp_path / "champsim_patch.json").is_file()
+    assert (tmp_path / "champsim_src" / "archzero_filter.cc").is_file()
+    assert out.get("sources")

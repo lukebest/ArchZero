@@ -54,3 +54,9 @@ Tier3/ChampSim backend writes under the candidate workdir:
 - `champsim_patch.json` / `MECHANISM_PATCH.md` — rebuild checklist
 
 This is **not** a compiled mechanism. Rebuild ChampSim after applying real sources.
+
+## Source stubs (`champsim_src/`)
+
+For prefetch/replacement families, `write_champsim_scaffold` also copies
+`archzero/sim/templates/champsim/*.cc|.h` into the candidate `champsim_src/`.
+Copy those into a ChampSim tree and rebuild before empirics count as evidence.
