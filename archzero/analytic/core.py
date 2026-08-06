@@ -54,6 +54,7 @@ def score_mechanism(
     *,
     target_miss_reduction: float = 0.15,
     area_budget_mm2: float = 0.5,
+    bw_slack: float = 0.05,
 ) -> dict:
     new_mpki = predicted_mpki(w, effect)
     reduction = 1.0 - (new_mpki / w.baseline_mpki if w.baseline_mpki else 1.0)
@@ -61,7 +62,7 @@ def score_mechanism(
     mem_frac = min(1.0, w.baseline_mpki * 0.05)
     local_speedup = 1.0 / max(1e-6, (1.0 - reduction))
     ipc_speedup = amdahl_speedup(mem_frac, local_speedup)
-    ok_bw = bandwidth_ok(w, effect)
+    ok_bw = bandwidth_ok(w, effect, slack=bw_slack)
     ok_area = effect.area_mm2 <= area_budget_mm2
     ok_perf = reduction >= target_miss_reduction
     return {

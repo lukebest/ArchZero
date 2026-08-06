@@ -3,18 +3,178 @@
     "id": "gold-prefetch-filter",
     "title": "Dead-block filtered prefetch",
     "family": "prefetch",
+    "mechanism": "256-entry dead-block filter ahead of L2 prefetch degree 2.",
+    "fixture": {
+      "miss_reduction": 0.2,
+      "extra_bw": 0.02,
+      "area": 0.25
+    },
     "expect": {
-      "tier0": "pass",
-      "tier2_meets_target": true,
-      "tier3_stub_min_reduction": 0.10
+      "tier3": "pass",
+      "evidence": "stub"
     }
   },
   {
     "id": "gold-impossible-bw",
     "title": "Infinite bandwidth oracle",
     "family": "oracle",
+    "mechanism": "Oracle that assumes unbounded DRAM bandwidth.",
     "expect": {
       "tier0": "fail"
+    }
+  },
+  {
+    "id": "gold-coalesce-partial",
+    "title": "Signature miss coalescer",
+    "family": "coalesce",
+    "mechanism": "Coalesce overlapping L2 miss signatures.",
+    "fixture": {
+      "miss_reduction": 0.08,
+      "extra_bw": 0.01,
+      "area": 0.2
+    },
+    "expect": {
+      "tier3": "fail",
+      "evidence": "stub"
+    }
+  },
+  {
+    "id": "gold-streamer-analytic",
+    "title": "History-length adaptive streamer",
+    "family": "streamer",
+    "mechanism": "Streamer with history length 4 and aggressive degree 4.",
+    "fixture": {
+      "miss_reduction": 0.18,
+      "extra_bw": 0.02,
+      "area": 0.3
+    },
+    "expect": {
+      "tier3": "pass",
+      "evidence": "stub"
+    }
+  },
+  {
+    "id": "gold-writeback-pass",
+    "title": "Bypass-aware writeback throttle",
+    "family": "bypass",
+    "mechanism": "Bypass threshold 0.6 writeback throttle.",
+    "fixture": {
+      "miss_reduction": 0.22,
+      "extra_bw": 0.01,
+      "area": 0.22
+    },
+    "expect": {
+      "tier3": "pass",
+      "evidence": "stub"
+    }
+  },
+  {
+    "id": "gold-physics-violation",
+    "title": "Thermodynamic free-energy cache",
+    "family": "physics",
+    "mechanism": "Claims negative energy and free performance.",
+    "expect": {
+      "tier0": "fail"
+    }
+  },
+  {
+    "id": "gold-bandwidth-exceed",
+    "title": "Aggressive prefetcher",
+    "family": "prefetch",
+    "mechanism": "Prefetch degree 8 without filter.",
+    "fixture": {
+      "miss_reduction": 0.22,
+      "extra_bw": 0.12,
+      "area": 0.3
+    },
+    "expect": {
+      "tier3": "fail",
+      "evidence": "stub"
+    }
+  },
+  {
+    "id": "gold-low-reduction",
+    "title": "Tiny table filter",
+    "family": "filter",
+    "mechanism": "16-entry filter with weak accuracy.",
+    "fixture": {
+      "miss_reduction": 0.05,
+      "extra_bw": 0.01,
+      "area": 0.1
+    },
+    "expect": {
+      "tier3": "fail",
+      "evidence": "stub"
+    }
+  },
+  {
+    "id": "gold-champsim-unavailable",
+    "title": "ChampSim path without binary",
+    "family": "prefetch",
+    "mechanism": "Would need ChampSim; binary intentionally missing.",
+    "fixture": {
+      "miss_reduction": 0.2,
+      "extra_bw": 0.02,
+      "area": 0.25
+    },
+    "expect": {
+      "tier3": "unavailable",
+      "backend": "champsim"
+    }
+  },
+  {
+    "id": "gold-directed-prefetch",
+    "title": "Directed event-model prefetch",
+    "family": "prefetch",
+    "mechanism": "256-entry filtered prefetch degree 2 for Magic Gap check.",
+    "fixture": {
+      "miss_reduction": 0.3,
+      "extra_bw": 0.02,
+      "area": 0.25,
+      "family": "prefetch"
+    },
+    "expect": {
+      "tier3": "pass",
+      "evidence": "directed",
+      "backend": "directed"
+    }
+  },
+  {
+    "id": "gold-directed-replacement",
+    "title": "RRPV-like replacement",
+    "family": "replacement",
+    "mechanism": "Replacement with history length 12 and 512 entries.",
+    "fixture": {
+      "miss_reduction": 0.28,
+      "extra_bw": 0.01,
+      "area": 0.2,
+      "family": "replacement"
+    },
+    "expect": {
+      "tier3": "pass",
+      "evidence": "directed",
+      "backend": "directed"
+    }
+  },
+  {
+    "id": "gold-magic-gap-high",
+    "title": "Overconfident analytic",
+    "family": "prefetch",
+    "mechanism": "Claims huge analytic gain; directed sim stays modest.",
+    "fixture": {
+      "miss_reduction": 0.08,
+      "extra_bw": 0.02,
+      "area": 0.25,
+      "family": "prefetch"
+    },
+    "metrics": {
+      "t2_miss_reduction": 0.5
+    },
+    "expect": {
+      "tier3": "fail",
+      "evidence": "directed",
+      "backend": "directed",
+      "magic_gap_gt": 2.0
     }
   }
 ]

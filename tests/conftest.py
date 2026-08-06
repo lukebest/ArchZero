@@ -34,7 +34,7 @@ def fake_llm() -> FakeLLM:
                 '{"verdict":"pass","score":0.9,"summary":"physics ok",'
                 '"physics_flags":[],"clause_refs":["REQ-001"]}'
             ),
-            "comprehend": "## Review\nPlausible mechanism.",
+            "comprehend": "**Status:** PASS\nCritique:\n- Spec covers ACC thresholds.\n",
             "synthesize": (
                 '{"verdict":"pass","score":0.8,"summary":"consensus pass",'
                 '"failure_modes":[],"clause_refs":["REQ-001"]}'

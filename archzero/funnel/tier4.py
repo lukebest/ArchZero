@@ -20,6 +20,7 @@ from archzero.models import (
     Verdict,
 )
 from archzero.sim.backend import SimRequest, get_backend
+from archzero.spec.acc_parse import parse_acceptance_thresholds
 
 JUDGE_PERSONA = """You are the final simulation adjudicator for an architecture funnel.
 Given problem acceptance criteria and simulation metrics, decide pass/fail.
@@ -53,6 +54,7 @@ async def evaluate_tier4(
     work = Path(candidate.workdir or (cfg.scratch_dir / candidate.id))
     work.mkdir(parents=True, exist_ok=True)
     candidate.workdir = str(work)
+    th = parse_acceptance_thresholds(problem)
 
     backend = get_backend(cfg)
     sim = backend.run(
@@ -61,23 +63,36 @@ async def evaluate_tier4(
             workdir=work,
             patch_hint=candidate.mechanism[:500],
             suite="full",
+            meta={
+                "title": candidate.title,
+                "mechanism": candidate.mechanism,
+                "family": candidate.family,
+                "min_miss_reduction": th.min_miss_reduction,
+                "max_bw_delta_frac": th.max_bw_delta_frac,
+            },
         )
     )
     candidate.metrics.update({f"t4_{k}": v for k, v in sim.metrics.items()})
 
     evidence = EvidenceLevel.STUB
-    if not sim.unavailable and cfg.sim.backend != "stub":
+    ev = str(sim.metrics.get("evidence") or "")
+    if not sim.unavailable and cfg.sim.backend not in {"stub"}:
         evidence = EvidenceLevel.SIM
-    if str(sim.metrics.get("evidence") or "") == "stub":
+    if ev == "stub":
         evidence = EvidenceLevel.STUB
+    if ev == "directed":
+        evidence = EvidenceLevel.SIM
 
-    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend != "stub":
+    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend not in {
+        "stub",
+        "directed",
+    }:
         result = TierResult(
             tier=Tier.T4,
             verdict=Verdict.UNAVAILABLE,
             score=float(sim.metrics.get("miss_reduction") or 0),
             summary=f"{sim.backend}: UNAVAILABLE under strict_evidence",
-            metrics=sim.metrics,
+            metrics={**sim.metrics, "thresholds": th.as_dict()},
             evidence=EvidenceLevel.STUB,
             clause_refs=candidate.clause_refs,
         )
@@ -91,6 +106,7 @@ async def evaluate_tier4(
     )
     ctx = (
         f"PROBLEM: {problem.title}\nACCEPTANCE:\n{acc}\n\n"
+        f"PARSED THRESHOLDS:\n{json.dumps(th.as_dict(), indent=2)}\n\n"
         f"CANDIDATE: {candidate.title}\n"
         f"SIM METRICS:\n{json.dumps(sim.metrics, indent=2)}\n"
         f"backend={sim.backend} unavailable_flag={sim.unavailable} evidence={evidence.value}"
@@ -100,12 +116,18 @@ async def evaluate_tier4(
             await llm.complete(JUDGE_PERSONA, ctx, TaskClass.FINAL_JUDGE, expect_json=True)
         )
     except Exception as exc:  # noqa: BLE001
-        # Fail closed on judge error when not stub; stub uses heuristic
+        # Fail closed on judge error when not stub; stub/directed uses ACC heuristic
         reduction = float(sim.metrics.get("miss_reduction") or 0)
-        if evidence == EvidenceLevel.STUB and cfg.sim.backend == "stub":
+        bw = float(sim.metrics.get("bw_delta_frac") or 0)
+        if cfg.sim.backend in {"stub", "directed"}:
+            ok = (
+                sim.ok
+                and reduction >= th.min_miss_reduction
+                and bw <= th.max_bw_delta_frac
+            )
             data = {
-                "verdict": "pass" if sim.ok and reduction >= 0.15 else "fail",
-                "summary": f"judge fallback (stub): {exc}",
+                "verdict": "pass" if ok else "fail",
+                "summary": f"judge fallback ({cfg.sim.backend}): {exc}",
                 "score": reduction,
             }
         else:

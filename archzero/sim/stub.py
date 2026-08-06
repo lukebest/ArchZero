@@ -59,7 +59,9 @@ class StubSimBackend(SimBackend):
         )
         log_path = req.workdir / f"sim_{req.suite}.json"
         log_path.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
-        ok = metrics.gate_ok()
+        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
+        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
+        ok = metrics.gate_ok(min_reduction=min_red, max_bw=max_bw)
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

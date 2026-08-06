@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from archzero.config import FactoryConfig
 from archzero.feedback.source import FeedbackSource, NullFeedbackSource
+from archzero.funnel.dedup import dedup_candidates
 from archzero.funnel.tier0 import evaluate_tier0
 from archzero.funnel.tier1 import evaluate_tier1
 from archzero.funnel.tier2 import evaluate_tier2
@@ -126,17 +126,43 @@ async def _run_tiers(
                     fail_message=str(exc),
                 )
 
-        sem = asyncio.Semaphore(cfg.budget.concurrency)
+        # Local worker pool (single-machine bounded concurrency)
+        from archzero.worker.queue import LocalWorkerPool, WorkerJob
 
-        async def guarded(c: Candidate) -> Candidate:
-            async with sem:
-                out = await run_one(c)
-                store.save_candidate(out, campaign_id=campaign.id)
-                for f in out.failures:
-                    store.save_failure(f)
-                return out
+        pool = LocalWorkerPool(concurrency=cfg.budget.concurrency)
 
-        active = list(await asyncio.gather(*[guarded(c) for c in active]))
+        async def _handle(job: WorkerJob[Candidate]) -> Candidate:
+            out = await run_one(job.payload)
+            store.save_candidate(out, campaign_id=campaign.id)
+            for f in out.failures:
+                store.save_failure(f)
+            return out
+
+        jobs = [WorkerJob(id=c.id, payload=c) for c in active]
+        results = await pool.map(jobs, _handle)
+        by_id = {r.job_id: r for r in results}
+        next_active: list[Candidate] = []
+        for c in active:
+            r = by_id.get(c.id)
+            if r is None or not r.ok or r.value is None:
+                from archzero.funnel.taxonomy import attach_result
+                from archzero.models import TierResult
+
+                failed = attach_result(
+                    c,
+                    TierResult(
+                        tier=tier,
+                        verdict=Verdict.FAIL,
+                        summary=f"worker error: {getattr(r, 'error', 'missing')}",
+                        score=0.0,
+                    ),
+                    fail_message=getattr(r, "error", None) or "worker missing",
+                )
+                store.save_candidate(failed, campaign_id=campaign.id)
+                next_active.append(failed)
+            else:
+                next_active.append(r.value)
+        active = next_active
 
         def _passed_tier(c: Candidate, t: Tier = tier) -> bool:
             return c.passed_through(t)
@@ -307,6 +333,19 @@ async def run_campaign(
             store.save_candidate(c, campaign_id=campaign.id)
             unique.append(c)
 
+        # Semantic near-duplicate drop (token Jaccard) beyond exact content_hash
+        deduped = dedup_candidates(unique, threshold=0.85)
+        if deduped.dropped:
+            campaign.meta["dedup_dropped"] = [
+                {
+                    "dropped": d.id,
+                    "near": n.id,
+                    "score": round(score, 3),
+                }
+                for d, n, score in deduped.dropped
+            ]
+            unique = deduped.kept
+
         active = await _run_tiers(cfg, store, campaign, problem, llm, unique, through)
 
         async def _do_frontier(pp: ProblemPackage) -> dict[str, Any]:
@@ -335,12 +374,15 @@ async def run_campaign(
             ]
 
             # Auto rounds: run funnel on expanded problem packages
+            from archzero.metrics.elimination import compute_elimination, snapshot_failures
+
             for r in range(max(0, auto_round)):
                 packages = list(frontier_result.get("packages") or [])
                 if not packages:
                     break
                 pp = packages[min(r, len(packages) - 1)]
                 round_name = f"{campaign.name} · frontier-round-{r + 1}"
+                baseline_snap = snapshot_failures(store.list_failures(campaign_id=campaign.id))
                 sub = await run_campaign(
                     cfg,
                     problem=pp,
@@ -350,6 +392,22 @@ async def run_campaign(
                     expand_frontier=False,
                     auto_round=0,
                 )
+                follow_id = sub.get("campaign_id")
+                if follow_id:
+                    elim = compute_elimination(
+                        store,
+                        source_campaign_id=campaign.id,
+                        followup_campaign_id=follow_id,
+                    )
+                    sub["elimination"] = elim
+                    sub["source_failures"] = baseline_snap
+                    sub["parent_campaign_id"] = campaign.id
+                    follow_camp = store.get_campaign(follow_id)
+                    if follow_camp is not None:
+                        follow_camp.meta["parent_campaign_id"] = campaign.id
+                        follow_camp.meta["source_failures"] = baseline_snap
+                        follow_camp.meta["elimination"] = elim
+                        store.save_campaign(follow_camp)
                 rounds_meta.append(sub)
                 # Expand again from latest
                 if r + 1 < auto_round:

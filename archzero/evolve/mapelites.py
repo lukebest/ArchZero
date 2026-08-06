@@ -118,6 +118,7 @@ class MapElitesBackend(EvolutionBackend):
                             ),
                             "area": (data.get("knobs") or {}).get("area", 0.3),
                             "evolved_gen": gen,
+                            "source_failure_ids": [f.id for f in parent.failures],
                         },
                     )
                     # Cheap analytic eval (not stub-only)
@@ -268,6 +269,11 @@ async def run_evolution(
             problem = store.get_problem(camp.problem_id) if camp else None
             if problem is not None:
                 reenter_through = cfg.evolve.reenter_through
+                from archzero.metrics.elimination import compute_elimination, snapshot_failures
+
+                baseline_snap = snapshot_failures(
+                    store.list_failures(campaign_id=campaign_id)
+                )
                 re = await run_campaign(
                     cfg,
                     problem=problem,
@@ -276,5 +282,15 @@ async def run_evolution(
                     candidates_override=children[: max(1, len(children))],
                     n_generate=0,
                 )
+                follow_id = re.get("campaign_id")
+                if follow_id:
+                    elim = compute_elimination(
+                        store,
+                        source_campaign_id=campaign_id,
+                        followup_campaign_id=follow_id,
+                    )
+                    re["elimination"] = elim
+                    re["source_failures"] = baseline_snap
+                    re["parent_campaign_id"] = campaign_id
                 summary["reenter"] = re
     return summary

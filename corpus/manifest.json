@@ -1,0 +1,75 @@
+{
+  "description": "Clean-room evaluation scaffold \u2014 NOT a 95-paper benchmark.",
+  "status": "scaffold",
+  "target_size": 95,
+  "disclaimer": "Placeholder entries for pipeline wiring. Do not report success_rate until status=complete and real papers are attached. Tier6 and deployment Feedback are out of scope.",
+  "label_schema": [
+    "reproduce",
+    "equivalent",
+    "alternative",
+    "defective"
+  ],
+  "evaluation_protocol": {
+    "cleanroom_tiers": [
+      "tier0",
+      "tier1",
+      "tier2"
+    ],
+    "success_labels": [
+      "reproduce",
+      "equivalent"
+    ],
+    "note": "Do not compute success_rate until status=complete and PDFs are real."
+  },
+  "entries": [
+    {
+      "id": "stub-prefetch",
+      "title": "Filtered L2 prefetch (scaffold)",
+      "spec": "papers/stub-prefetch/problem.md",
+      "pdf": "papers/stub-prefetch/paper.stub.pdf",
+      "family": "prefetch",
+      "expected_label": null,
+      "cleanroom_label": null,
+      "quantitative": false,
+      "evaluated": false,
+      "notes": "scaffold \u2014 attach real PDF before evaluation"
+    },
+    {
+      "id": "stub-replacement",
+      "title": "History-aware replacement (scaffold)",
+      "spec": "papers/stub-replacement/problem.md",
+      "pdf": "papers/stub-replacement/paper.stub.pdf",
+      "family": "replacement",
+      "expected_label": null,
+      "cleanroom_label": null,
+      "quantitative": false,
+      "evaluated": false,
+      "notes": "scaffold \u2014 attach real PDF before evaluation"
+    },
+    {
+      "id": "stub-bypass",
+      "title": "Bypass-aware writeback (scaffold)",
+      "spec": "papers/stub-bypass/problem.md",
+      "pdf": "papers/stub-bypass/paper.stub.pdf",
+      "family": "bypass",
+      "expected_label": null,
+      "cleanroom_label": null,
+      "quantitative": false,
+      "evaluated": false,
+      "notes": "scaffold \u2014 attach real PDF before evaluation"
+    },
+    {
+      "id": "arch-alphazero",
+      "title": "Computer Architecture's AlphaZero Moment",
+      "spec": "papers/arch-alphazero/problem.md",
+      "pdf": "papers/arch-alphazero/paper.pdf",
+      "family": "other",
+      "expected_label": "equivalent",
+      "cleanroom_label": "equivalent",
+      "quantitative": false,
+      "evaluated": false,
+      "notes": "real PDF + NDF scaffold; not a full paper reproduction claim",
+      "pdf_real": true
+    }
+  ]
+}

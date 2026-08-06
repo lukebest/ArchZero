@@ -81,3 +81,20 @@ def failures_as_signals(failures: list[FailureRecord], limit: int = 20) -> list[
     for f in failures[:limit]:
         out.append(f"[{f.tier.value}/{f.kind.value}] {f.message}")
     return out
+
+
+def failures_as_structured(failures: list[FailureRecord], limit: int = 20) -> list[dict]:
+    """Structured failure signals including ids for causal tracking."""
+    out: list[dict] = []
+    for f in failures[:limit]:
+        out.append(
+            {
+                "id": f.id,
+                "tier": f.tier.value,
+                "kind": f.kind.value,
+                "message": (f.message or "")[:160],
+                "candidate_id": f.candidate_id,
+            }
+        )
+    return out
+

@@ -53,6 +53,30 @@ def build_report(cfg: FactoryConfig, campaign_id: str | None = None) -> str:
 
         fails = store.list_failures(campaign_id=camp.id)
         summary = summarize_failures(fails)
+        elim = (camp.meta or {}).get("elimination")
+        if elim:
+            lines.append("### Failure elimination (causal)")
+            lines.append("")
+            parent = elim.get("source_campaign_id") or (camp.meta or {}).get(
+                "parent_campaign_id"
+            )
+            if parent:
+                lines.append(f"- source campaign: `{parent}`")
+            lines.append(
+                f"- kinds eliminated: {', '.join(elim.get('kinds_eliminated') or []) or '—'}"
+            )
+            lines.append(
+                f"- kinds reduced: {', '.join(elim.get('kinds_reduced') or []) or '—'}"
+            )
+            lines.append(
+                f"- kind_elimination_rate: {elim.get('kind_elimination_rate')}"
+            )
+            lines.append(
+                f"- fingerprints eliminated/persisted: "
+                f"{elim.get('fingerprints_eliminated')}/"
+                f"{elim.get('fingerprints_persisted')}"
+            )
+            lines.append("")
         lines.append("### Failure taxonomy")
         lines.append("")
         if summary:

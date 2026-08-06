@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 from archzero.config import ROOT, FactoryConfig
 from archzero.sim.backend import get_backend
@@ -160,6 +161,92 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
             name="funnel.strict_evidence",
             ok=True,
             detail=str(cfg.funnel.strict_evidence),
+            severity="info",
+        )
+    )
+
+
+    # Corpus / scale-out / ChampSim guidance (Tier6 & Feedback remain deferred)
+    corpus = ROOT / "corpus" / "manifest.json"
+    try:
+        from archzero.corpus.status import corpus_status
+
+        st = corpus_status()
+        checks.append(
+            Check(
+                name="corpus scaffold",
+                ok=bool(st.get("ok")),
+                detail=(
+                    f"{st.get('coverage')} status={st.get('status')} "
+                    f"pdf_real={st.get('pdf_real', 0)} "
+                    f"(success_rate={st.get('success_rate')})"
+                    if st.get("ok")
+                    else st.get("message", "missing")
+                ),
+                severity="info",
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            Check(
+                name="corpus scaffold",
+                ok=corpus.is_file(),
+                detail=f"status error: {exc}",
+                severity="warn",
+            )
+        )
+
+    try:
+        from archzero.worker.queue import LocalWorkerPool  # noqa: F401
+
+        checks.append(
+            Check(
+                name="worker pool",
+                ok=True,
+                detail=f"LocalWorkerPool concurrency default via budget.concurrency={cfg.budget.concurrency}",
+                severity="info",
+            )
+        )
+    except ImportError:
+        checks.append(
+            Check(
+                name="worker pool",
+                ok=False,
+                detail="archzero.worker.queue missing",
+                severity="warn",
+            )
+        )
+
+    champsim_doc = ROOT / "tools" / "CHAMPSIM.md"
+    bin_path = cfg.sim.champsim_bin
+    bin_ok = bool(bin_path and Path(bin_path).exists()) if bin_path else False
+    if not bin_ok:
+        for cand in (
+            ROOT / "tools" / "champsim" / "bin" / "champsim",
+            ROOT / "tools" / "champsim" / "champsim",
+        ):
+            if cand.exists():
+                bin_ok = True
+                bin_path = str(cand)
+                break
+    checks.append(
+        Check(
+            name="ChampSim optional",
+            ok=True,
+            detail=(
+                f"binary ready ({bin_path})"
+                if bin_ok
+                else f"not built — see {champsim_doc.relative_to(ROOT)} (pytest -m champsim skips)"
+            ),
+            severity="info",
+        )
+    )
+
+    checks.append(
+        Check(
+            name="funnel.llm_dedicated_sim",
+            ok=True,
+            detail=str(cfg.funnel.llm_dedicated_sim),
             severity="info",
         )
     )

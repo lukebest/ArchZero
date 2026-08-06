@@ -38,6 +38,12 @@ packages = ["archzero"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "directed: directed sim backend smoke (offline)",
+  "ensemble: Tier2 ensemble_n>1 smoke",
+  "paper: paper-profile config checks",
+  "champsim: optional ChampSim binary smoke",
+]
 
 [tool.ruff]
 line-length = 100

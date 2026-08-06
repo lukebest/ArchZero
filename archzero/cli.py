@@ -637,5 +637,108 @@ def version_cmd() -> None:
     console.print(__version__)
 
 
+
+@app.command("corpus")
+def corpus_status_cmd(
+    ctx: typer.Context,
+    path: Optional[Path] = typer.Option(
+        None, "--path", help="Corpus root (default: ./corpus)"
+    ),
+) -> None:
+    """Show clean-room corpus scaffold status (no invented success rates)."""
+    from archzero.corpus.status import corpus_status
+
+    st = corpus_status(path)
+    if not st.get("ok"):
+        console.print(f"[red]{st.get('message')}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[bold]Corpus[/bold] {st['path']}")
+    console.print(f"status: {st['status']}  coverage: {st['coverage']}")
+    console.print(f"evaluated: {st['evaluated']}  success_rate: {st['success_rate']}")
+    console.print(f"[dim]{st['disclaimer']}[/dim]")
+    if st.get("entry_ids"):
+        console.print("entries: " + ", ".join(str(x) for x in st["entry_ids"]))
+
+
+
+@app.command("corpus-add-pdf")
+def corpus_add_pdf_cmd(
+    ctx: typer.Context,
+    entry_id: str = typer.Argument(..., help="Corpus entry id"),
+    pdf: Path = typer.Argument(..., exists=True, readable=True, help="Path to PDF"),
+    title: Optional[str] = typer.Option(None, "--title"),
+    family: str = typer.Option("unclassified", "--family"),
+    label: Optional[str] = typer.Option(
+        None, "--label", help="cleanroom label: reproduce|equivalent|alternative|defective"
+    ),
+    corpus_path: Optional[Path] = typer.Option(None, "--corpus", help="Corpus root"),
+) -> None:
+    """Register a real paper PDF into the corpus scaffold (does not invent success rates)."""
+    from archzero.corpus.ingest import add_paper_pdf
+
+    try:
+        st = add_paper_pdf(
+            entry_id=entry_id,
+            pdf_path=pdf,
+            title=title,
+            family=family,
+            cleanroom_label=label,
+            corpus_root=corpus_path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]ok[/green] entry={st['entry_id']} pdf={st['pdf']}")
+    console.print(f"status={st['status']} label={st.get('cleanroom_label')}")
+    console.print(f"[dim]{st['message']}[/dim]")
+
+
+
+@app.command("corpus-eval-offline")
+def corpus_eval_offline_cmd(
+    ctx: typer.Context,
+    corpus_path: Optional[Path] = typer.Option(None, "--corpus"),
+    through: str = typer.Option("tier2", "--through"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    only_pdf: bool = typer.Option(False, "--only-pdf"),
+) -> None:
+    """Batch-evaluate corpus entries offline with FakeLLM (no invented success rates)."""
+    cfg = _cfg(ctx.obj.get("config_path"))
+    from archzero.corpus.batch_eval import evaluate_corpus_batch
+    from archzero.models import Tier
+
+    try:
+        th = Tier(through)
+    except ValueError as exc:
+        console.print(f"[red]bad --through[/red]: {through}")
+        raise typer.Exit(1) from exc
+
+    async def _run():
+        return await evaluate_corpus_batch(
+            cfg,
+            corpus_root=corpus_path,
+            through=th,
+            limit=limit,
+            only_with_pdf=only_pdf,
+        )
+
+    data = asyncio.run(_run())
+    if not data.get("ok"):
+        console.print(f"[red]{data.get('error')}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[bold]Corpus offline batch[/bold] entries={data['n_entries']} "
+        f"pass={data['n_pass_offline']} success_rate={data['success_rate']}"
+    )
+    console.print(f"[dim]{data['disclaimer']}[/dim]")
+    for r in data.get("results") or []:
+        tone = "green" if r.get("last_verdict") == "pass" else "yellow"
+        console.print(
+            f"  [{tone}]{r.get('entry_id')}[/{tone}] "
+            f"{r.get('last_tier')}/{r.get('last_verdict')} "
+            f"pdf_real={r.get('pdf_real')}"
+        )
+
+
 if __name__ == "__main__":
     app()

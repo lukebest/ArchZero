@@ -26,3 +26,7 @@ traces_dir = "benchmarks/traces"
 
 Synthetic traces are for **layout / CI smoke only**. Replace with real ChampSim
 traces before claiming architectural results.
+
+## Optional CI smoke
+
+See [tools/CHAMPSIM.md](../tools/CHAMPSIM.md) for turning `pytest -m champsim` from skip → green.
