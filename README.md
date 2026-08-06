@@ -14,14 +14,14 @@
 | NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint；ACC 数值解析进 T2–T4 |
 | Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
 | Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
-| Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`archzero.paper.toml` 可开 ×3 |
-| Tier3 directed / dedicated | Implemented | directed 机制模型；`llm_dedicated_sim` 自测参与裁决；ACC（miss/BW/area/Magic Gap） |
+| Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`-c archzero.paper.toml` 可开 ×3 |
+| Tier3 directed / dedicated | Implemented | directed 机制模型；`-c archzero.paper.toml` 开 `llm_dedicated_sim`（自测参与裁决）；ACC（miss/BW/area/Magic Gap） |
 | Tier3/4 ChampSim | Optional | 二进制缺省→`UNAVAILABLE`（`strict_evidence`）；见 `tools/CHAMPSIM.md` |
 | Tier3/4 gem5 | Scaffold | 需本机 gem5 + agent harness |
 | Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
 | Tier6 Signoff | Deferred | **暂不实现** OpenROAD/sky130；`evaluate_tier6` 恒 UNAVAILABLE |
 | Evolution | Implemented | MAP-Elites + reenter；失败消除度量（OpenEvolve 仍为桥接） |
-| Corpus | Scaffold | 4 条目脚手架；`corpus-add-pdf` / offline batch 写 `evaluated`；不发明成功率 |
+| Corpus | Scaffold | 4 条目（含 1 条真实 PDF 示例）；`corpus` / `corpus-add-pdf` / `corpus-import-wiki` / `corpus-eval-offline`；不发明成功率 |
 | Scale-out | Prototype | Jaccard 去重 + `LocalWorkerPool`（单机） |
 | Feedback 遥测 | Deferred | **暂不实现**；`NullFeedbackSource` only |
 
@@ -51,6 +51,8 @@ export CURSOR_API_KEY="cursor_..."   # Dashboard → Integrations
 uv sync --extra dev                  # 或: pip install -e ".[dev]"
 uv run archzero doctor               # 检查 API key / personas / sim / corpus
 ```
+
+可选：`uv run archzero init` 写入默认 `archzero.toml` 并创建 `.archzero/` 状态目录。
 
 #### 环境依赖一览
 
@@ -88,12 +90,15 @@ bash tools/setup_pycircuit.sh
 
 ```toml
 [sim]
-backend = "champsim"   # 或 stub / gem5
+backend = "champsim"   # stub（默认）| directed | champsim | gem5
 champsim_bin = "tools/champsim/bin/champsim"
 traces_dir = "benchmarks/traces"
 
 [funnel]
 strict_evidence = true   # 真实后端不可用时 T3+ → UNAVAILABLE，绝不假 PASS
+ensemble_n = 1
+use_verifiers = true
+llm_dedicated_sim = false
 
 [rtl]
 pycircuit_root = "vendor/pycircuit"
@@ -103,10 +108,17 @@ pyc_toolchain_root = ".pycircuit_out/toolchain/install"
 enabled = false          # Tier6 reserved
 ```
 
+论文协议更密的漏斗（ensemble×3 + directed + dedicated_sim）用旁路配置，不必改默认文件：
+
+```bash
+uv run archzero -c archzero.paper.toml run --spec specs/demo.md --through tier3 --n 5
+```
+
 ### 2. 自检模型目录与池划分
 
 ```bash
 uv run archzero models
+# uv run archzero models --refresh   # 绕过目录缓存
 ```
 
 - **默认模型**：全部 Task 默认走池 1 的 `cursor-grok-4.5-high-fast`（可在 `archzero.toml` `[pools].preferred_cursor` 改）
@@ -129,16 +141,24 @@ uv run archzero ideate path/to/paper.pdf --spec specs/demo.md -o candidates/
 uv run archzero run --spec specs/demo.md --pdf path/to/paper.pdf --through tier4
 ```
 
+扩题后自动再跑漏斗（§5.1 auto-round）：
+
+```bash
+uv run archzero run --spec specs/demo.md --n 5 \
+  --expand-frontier --frontier-offline --auto-round 1
+```
+
 进化搜索（对已进入 Tier2 的候选）：
 
 ```bash
 uv run archzero evolve --campaign <campaign_id>
+# uv run archzero evolve --campaign <id> --generations 5 --no-reenter
 ```
 
 ### 4. 研究员日常查看
 
 ```bash
-uv run archzero doctor                 # API key / personas / sim 前置检查
+uv run archzero doctor                 # API key / personas / sim / corpus 前置检查
 uv run archzero seed-demo              # 离线示例 campaign（无需 LLM，立刻可看漏斗）
 uv run archzero campaigns              # 列出 campaign
 uv run archzero status <campaign_id>   # 漏斗吞吐快照
@@ -160,6 +180,18 @@ uv run archzero run --resume <campaign_id> --through tier3  # 断点续跑
 uv run archzero e2e --spec specs/demo.md --offline          # 离线演示到 Tier5
 uv run archzero reproduce bundles/<exported>/               # 校验可复现包 + stub 回放
 ```
+
+### 5. Corpus 脚手架（不发明成功率）
+
+```bash
+uv run archzero corpus                                    # 状态 / coverage；scaffold 时 success_rate 恒为 null
+uv run archzero corpus-add-pdf <entry_id> path/to.pdf \
+  --title "…" --family prefetch --label equivalent
+uv run archzero corpus-import-wiki /path/to/wiki --dry-run   # 仅导入原始 PDF
+uv run archzero corpus-eval-offline --through tier2 --limit 3  # FakeLLM 离线批跑
+```
+
+仓库内示例：`bash tools/demo_corpus_pdf.sh`（注册 `docs/2604.03312v1.pdf`）。细节见 [`corpus/README.md`](corpus/README.md) · [`corpus/EXAMPLE_WORKFLOW.md`](corpus/EXAMPLE_WORKFLOW.md)。
 
 看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  
 中文快速入门：[`docs/researcher-quickstart.html`](docs/researcher-quickstart.html)（或 `archzero ui` 后打开 `/quickstart.html`）。
@@ -301,17 +333,21 @@ archzero/           # 产品代码
   llm/              # Cursor SDK 客户端、目录、路由、预算、shim
   spec/             # NDF-lite
   generation/       # 理解 / clean-room / frontier
-  personas/         # 评审/读论文人设（自 Gauntlet 精选迁入，引擎未使用）
+  personas/         # 评审/读论文人设（自 Gauntlet 精选迁入）
   funnel/           # Tier0–5 + pipeline
   analytic/         # 共享解析核
-  sim/              # stub | champsim | gem5
+  sim/              # stub | directed | champsim | gem5
+  corpus/           # clean-room 语料脚手架（ingest / offline batch）
   evolve/           # MAP-Elites + OpenEvolve 适配
   feedback/         # 遥测接口（暂缓）
   report/           # 周级漏斗报告
   store/            # SQLite + 内容寻址产物
   web/              # 本地研究员看板（stdlib HTTP + 单页 UI）
   doctor.py         # 运行前环境自检
+  cli.py            # Typer 入口（uv run archzero …）
 specs/demo.md       # 示例问题包
+corpus/             # 语料 manifest + papers/（见 corpus/README.md）
+archzero.paper.toml # 论文协议旁路配置（ensemble / directed / dedicated_sim）
 docs/analysis-*.md  # 与外部仓库对照分析
 ```
 
@@ -334,13 +370,17 @@ docs/analysis-*.md  # 与外部仓库对照分析
 
 ## 配置
 
-见 [`archzero.toml`](archzero.toml)。关键项：
+见 [`archzero.toml`](archzero.toml)。全局可用 `-c` / `--config` 指定旁路文件（如 [`archzero.paper.toml`](archzero.paper.toml)）。关键项：
 
 - `[pools]` — 模型偏好与池划分
-- `[budget]` — 池 2 token/调用上限、并发
+- `[budget]` — 池 2 token/调用上限、并发；可选 `cursor_pool_max_tokens`（或 `run --max-tokens`）
 - `[quotas]` — 各 tier 保留名额
-- `[sim] backend` — `stub`（默认）/ `champsim` / `gem5`
-- `[evolve] backend` — `mapelites`（默认）/ `openevolve`
+- `[funnel]` — `strict_evidence` / `ensemble_n` / `use_verifiers` / `llm_dedicated_sim`
+- `[sim] backend` — `stub`（默认）/ `directed` / `champsim` / `gem5`
+- `[rtl]` — pyCircuit 根目录与 toolchain
+- `[sign] enabled` — Tier6 预留，保持 `false`
+- `[evolve] backend` — `mapelites`（默认）/ `openevolve`；`reenter_through` 控制进化回流深度
+- `[routing].routes` — Task → `cursor` / `other`（默认全走 cursor）
 
 ---
 
@@ -348,12 +388,15 @@ docs/analysis-*.md  # 与外部仓库对照分析
 
 ```bash
 uv run pytest
+uv run archzero doctor
 uv run archzero models
+uv run archzero corpus
 uv run archzero run --spec specs/demo.md --through tier2 --n 5
 uv run archzero report
 ```
 
-端到端成功标志：候选写入 SQLite、Tier0–2 有裁决、`report.md` 含吞吐 / 失败分类 / 两池用量。
+端到端成功标志：候选写入 SQLite、Tier0–2 有裁决、`report.md` 含吞吐 / 失败分类 / 两池用量。  
+可选：`uv run pytest -m champsim`（需先按 `tools/CHAMPSIM.md` 建二进制）；`uv run archzero -c archzero.paper.toml e2e --offline`。
 
 ---
 
