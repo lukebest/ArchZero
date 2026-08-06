@@ -34,3 +34,12 @@ archzero corpus-eval-offline --through tier2 --limit 3
 Runs FakeLLM through Tier0–2 per entry. `success_rate` stays `null` on scaffold.
 Does **not** exercise Tier6 or deployment Feedback.
 
+
+## Import PDFs from an OKF / LLM wiki
+
+Only **raw PDFs** are registered; markdown summaries are skipped (clean-room hygiene):
+
+```bash
+archzero corpus-import-wiki /path/to/AI_infra_LLM_wiki --dry-run
+archzero corpus-import-wiki /path/to/AI_infra_LLM_wiki --limit 5 --family prefetch
+```

@@ -694,6 +694,37 @@ def corpus_add_pdf_cmd(
 
 
 
+@app.command("corpus-import-wiki")
+def corpus_import_wiki_cmd(
+    ctx: typer.Context,
+    wiki: Path = typer.Argument(..., exists=True, file_okay=False, help="Wiki repo root"),
+    corpus_path: Optional[Path] = typer.Option(None, "--corpus"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    family: str = typer.Option("unclassified", "--family"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Import raw PDFs from an OKF/LLM wiki into the corpus (summaries skipped)."""
+    from archzero.corpus.wiki_import import import_wiki_pdfs
+
+    data = import_wiki_pdfs(
+        wiki,
+        corpus_root=corpus_path,
+        limit=limit,
+        family=family,
+        dry_run=dry_run,
+    )
+    console.print(
+        f"[bold]Wiki→corpus[/bold] found={data['n_found']} imported={data['n_imported']} "
+        f"dry_run={data['dry_run']}"
+    )
+    console.print(f"[dim]{data['disclaimer']}[/dim]")
+    for r in data.get("results") or []:
+        if r.get("ok"):
+            console.print(f"  [green]{r.get('entry_id')}[/green] {r.get('pdf') or r.get('source')}")
+        else:
+            console.print(f"  [red]{r.get('entry_id')}[/red] {r.get('error')}")
+
+
 @app.command("corpus-eval-offline")
 def corpus_eval_offline_cmd(
     ctx: typer.Context,

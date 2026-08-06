@@ -8,6 +8,7 @@ from pathlib import Path
 
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimBackend, SimRequest, SimResult
+from archzero.sim.gem5_harness import write_gem5_harness
 from archzero.sim.metrics import SimMetrics, compute_reduction
 from archzero.sim.parse_gem5 import parse_stats_txt
 from archzero.sim.stub import StubSimBackend
@@ -36,13 +37,8 @@ class Gem5Backend(SimBackend):
         bin_path = Path(self.cfg.sim.gem5_bin)  # type: ignore[arg-type]
         script = req.workdir / "run_gem5.py"
         if not script.exists():
-            return SimResult(
-                ok=False,
-                metrics={"evidence": "sim", "error": "missing run_gem5.py"},
-                log="agent must write run_gem5.py",
-                backend="gem5",
-                unavailable=False,
-            )
+            write_gem5_harness(req.workdir)
+            script = req.workdir / "run_gem5.py"
 
         knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
         knob_path = req.workdir / "sim_knobs.json"
@@ -108,8 +104,16 @@ class Gem5Backend(SimBackend):
             cycles=stats.get("cycles"),
             extra={"returncode": proc.returncode},
         )
+        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
+        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
+        area_budget = req.meta.get("area_budget_mm2")
+        ok = proc.returncode == 0 and metrics.gate_ok(
+            min_reduction=min_red,
+            max_bw=max_bw,
+            area_budget_mm2=float(area_budget) if area_budget is not None else None,
+        )
         return SimResult(
-            ok=proc.returncode == 0 and metrics.gate_ok(),
+            ok=ok,
             metrics=metrics.as_dict(),
             log=proc.stdout + "\n" + proc.stderr,
             backend="gem5",

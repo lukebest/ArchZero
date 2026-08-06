@@ -69,3 +69,7 @@ Predicted MPKI reduction ≥ 15%; Magic Gap ≤ 2×.
     assert data["success_rate"] is None
     assert data["n_entries"] == 1
     assert data["results"][0]["ok"] is True
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["entries"][0]["evaluated"] is True
+    assert manifest["entries"][0].get("last_offline_verdict") is not None
+    assert manifest.get("status") == "scaffold"

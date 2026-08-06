@@ -38,11 +38,22 @@ class SimMetrics(BaseModel):
         d.update(extra)
         return d
 
-    def gate_ok(self, *, min_reduction: float = 0.15, max_bw: float = 0.05) -> bool:
+    def gate_ok(
+        self,
+        *,
+        min_reduction: float = 0.15,
+        max_bw: float = 0.05,
+        area_budget_mm2: float | None = None,
+    ) -> bool:
         """Default thresholds match demo ACC (≥15% MPKI, ≤5% BW); override from ACC parse."""
         r = float(self.miss_reduction or 0.0)
         bw = float(self.bw_delta_frac or 0.0)
-        return r >= min_reduction and bw <= max_bw
+        if r < min_reduction or bw > max_bw:
+            return False
+        if area_budget_mm2 is not None and self.area_mm2 is not None:
+            if float(self.area_mm2) > float(area_budget_mm2):
+                return False
+        return True
 
 
 def geo_mean(values: list[float]) -> float | None:

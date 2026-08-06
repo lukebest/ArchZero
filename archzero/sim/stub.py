@@ -61,7 +61,12 @@ class StubSimBackend(SimBackend):
         log_path.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
         min_red = float(req.meta.get("min_miss_reduction") or 0.15)
         max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
-        ok = metrics.gate_ok(min_reduction=min_red, max_bw=max_bw)
+        area_budget = req.meta.get("area_budget_mm2")
+        ok = metrics.gate_ok(
+            min_reduction=min_red,
+            max_bw=max_bw,
+            area_budget_mm2=float(area_budget) if area_budget is not None else None,
+        )
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

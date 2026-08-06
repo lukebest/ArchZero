@@ -37,6 +37,31 @@ def test_sim_metrics_gate_uses_acc_defaults():
     assert ok.gate_ok()
     bad = SimMetrics(evidence="stub", miss_reduction=0.10, bw_delta_frac=0.02)
     assert not bad.gate_ok()  # default min_reduction is 0.15
+    area_ok = SimMetrics(
+        evidence="stub",
+        miss_reduction=0.2,
+        bw_delta_frac=0.01,
+        area_mm2=0.4,
+    )
+    assert area_ok.gate_ok(area_budget_mm2=0.5)
+    area_bad = SimMetrics(
+        evidence="stub",
+        miss_reduction=0.2,
+        bw_delta_frac=0.01,
+        area_mm2=0.9,
+    )
+    assert not area_bad.gate_ok(area_budget_mm2=0.5)
+
+
+def test_tier2_threshold_gate_bw_and_area(demo_problem):
+    from archzero.funnel.tier2 import _threshold_gate
+
+    th = parse_acceptance_thresholds(demo_problem)
+    assert _threshold_gate({"miss_reduction": 0.2, "bw_delta_frac": 0.02}, th)[0]
+    assert not _threshold_gate({"miss_reduction": 0.2, "bw_delta_frac": 0.2}, th)[0]
+    assert not _threshold_gate(
+        {"miss_reduction": 0.2, "bw_delta_frac": 0.01, "area_mm2": 2.0}, th
+    )[0]
 
 
 def test_acc_parse_demo(demo_problem):
