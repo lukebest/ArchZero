@@ -12,6 +12,7 @@ def test_doctor_has_corpus_and_worker_checks(tmp_cfg):
 
     names = {c.name for c in run_doctor(tmp_cfg)}
     assert "corpus scaffold" in names
+    assert "ChampSim source stubs" in names
     assert "worker pool" in names
     assert "ChampSim optional" in names
 

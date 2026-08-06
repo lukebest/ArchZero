@@ -229,24 +229,45 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
                 bin_ok = True
                 bin_path = str(cand)
                 break
+    tmpl = ROOT / "archzero" / "sim" / "templates" / "champsim"
+    tmpl_ok = (tmpl / "archzero_filter.cc").is_file() and (tmpl / "archzero_rrpv.cc").is_file()
+    if bin_ok:
+        cs_detail = f"binary ready ({bin_path})"
+    else:
+        cs_detail = (
+            f"not built — see {champsim_doc.relative_to(ROOT)}; "
+            f"source stubs {'ok' if tmpl_ok else 'missing'} at "
+            f"{tmpl.relative_to(ROOT)} (emitted as champsim_src/)"
+        )
     checks.append(
         Check(
             name="ChampSim optional",
             ok=True,
-            detail=(
-                f"binary ready ({bin_path})"
-                if bin_ok
-                else f"not built — see {champsim_doc.relative_to(ROOT)} (pytest -m champsim skips)"
-            ),
+            detail=cs_detail,
             severity="info",
         )
     )
+    checks.append(
+        Check(
+            name="ChampSim source stubs",
+            ok=tmpl_ok,
+            detail=str(tmpl.relative_to(ROOT)) if tmpl_ok else f"missing {tmpl}",
+            severity="warn" if not tmpl_ok else "info",
+        )
+    )
 
+    ded = cfg.funnel.llm_dedicated_sim
+    paper_prof = ROOT / "archzero.paper.toml"
+    ded_detail = str(ded)
+    if ded:
+        ded_detail += " (dedicated_sim adjudicates Tier3)"
+    elif paper_prof.is_file():
+        ded_detail += " — enable via -c archzero.paper.toml"
     checks.append(
         Check(
             name="funnel.llm_dedicated_sim",
             ok=True,
-            detail=str(cfg.funnel.llm_dedicated_sim),
+            detail=ded_detail,
             severity="info",
         )
     )
