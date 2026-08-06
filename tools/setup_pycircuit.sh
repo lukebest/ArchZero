@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Clone / update pyCircuit submodule and build pycc with LLVM 19 (apt packages).
-# Memory-constrained hosts: use JOBS=2 (default).
+#
+# Host deps (script installs via apt when missing llvm-config-19):
+#   wget, sudo, cmake, ninja-build, clang,
+#   llvm-19-dev, mlir-19-tools, libmlir-19-dev, verilator, iverilog
+# Memory-constrained hosts: JOBS=2 (default) or JOBS=1.
+# Docs: README.md §环境依赖一览
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/vendor/pycircuit"

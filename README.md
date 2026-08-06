@@ -44,21 +44,43 @@ Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5 ⇢ Tier6(reserved)
 
 ### 1. 依赖与 API Key
 
-需要 Cursor **Pro 及以上**（Start 计划不含 SDK）。
+需要 Cursor **Pro 及以上**（Start 计划不含 SDK）。Python **≥ 3.11**，推荐 [`uv`](https://github.com/astral-sh/uv)。
 
 ```bash
 export CURSOR_API_KEY="cursor_..."   # Dashboard → Integrations
 uv sync --extra dev                  # 或: pip install -e ".[dev]"
+uv run archzero doctor               # 检查 API key / personas / sim / corpus
 ```
+
+#### 环境依赖一览
+
+| 层 | 必需？ | 依赖 | 安装 |
+|----|--------|------|------|
+| 核心 Python | 是 | `cursor-sdk`、`pydantic`、`typer`…（见 `pyproject.toml`） | `uv sync --extra dev` |
+| ChampSim（T3/T4 实证） | 可选 | 主机：`g++`/`cmake`/`git`/`curl`/`zip`/`unzip`；**vcpkg**：`fmt`、`cli11`、`nlohmann-json`、`bzip2`、`liblzma`、`zlib`、`catch2` | `JOBS=2 bash tools/setup_champsim.sh`（详 [`tools/CHAMPSIM.md`](tools/CHAMPSIM.md)） |
+| Traces | ChampSim 用 | 合成或 DPC 轨迹 | `uv run python benchmarks/fetch_traces.py --synthetic` |
+| pyCircuit / RTL（T5） | 可选 | LLVM/MLIR 19、`cmake`、`ninja`、`verilator`、`iverilog` | `bash tools/setup_pycircuit.sh`（需 sudo） |
+| gem5 | 可选 / scaffold | 本机 `gem5` 二进制 + `run_gem5.py` harness | 自行安装；缺省 fail-closed |
+| Tier6 / Feedback | 延期 | — | 不安装 |
+
+ChampSim 主机包（Ubuntu/Debian）示例：
+
+```bash
+sudo apt-get install -y \
+  build-essential cmake ninja-build git curl zip unzip pkg-config tar ca-certificates
+JOBS=2 bash tools/setup_champsim.sh
+```
+
+若出现 `fmt/core.h: No such file`，说明 vcpkg 未装好或 `absolute.options` 过期——重新跑上述脚本即可（勿只装系统 `libfmt9`）。
 
 ### 可选工具链（真实仿真 / RTL）
 
 ```bash
-# ChampSim + 合成 demo traces
-bash tools/setup_champsim.sh
-python benchmarks/fetch_traces.py --synthetic
+# ChampSim + 合成 demo traces（完整依赖见 tools/CHAMPSIM.md）
+JOBS=2 bash tools/setup_champsim.sh
+uv run python benchmarks/fetch_traces.py --synthetic
 
-# pyCircuit (LLVM 19 apt + pycc，建议 JOBS=2)
+# pyCircuit (LLVM 19 apt + pycc，建议 JOBS=2，需 sudo)
 bash tools/setup_pycircuit.sh
 ```
 
