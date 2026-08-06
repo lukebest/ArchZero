@@ -69,6 +69,7 @@ async def evaluate_tier4(
                 "family": candidate.family,
                 "min_miss_reduction": th.min_miss_reduction,
                 "max_bw_delta_frac": th.max_bw_delta_frac,
+                "area_budget_mm2": th.area_budget_mm2,
             },
         )
     )

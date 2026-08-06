@@ -15,11 +15,13 @@
 | Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
 | Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
 | Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`archzero.paper.toml` 可开 ×3 |
-| Tier3 / Tier4 | Implemented / Stub | stub / directed / ChampSim；dedicated_sim 生成+自测；`strict_evidence` |
+| Tier3 directed / dedicated | Implemented | directed 机制模型；`llm_dedicated_sim` 自测参与裁决；ACC（miss/BW/area/Magic Gap） |
+| Tier3/4 ChampSim | Optional | 二进制缺省→`UNAVAILABLE`（`strict_evidence`）；见 `tools/CHAMPSIM.md` |
+| Tier3/4 gem5 | Scaffold | 需本机 gem5 + agent harness |
 | Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
-| Tier6 Signoff | Planned (reserved) | **暂不实现** OpenROAD/sky130；`evaluate_tier6` 恒 UNAVAILABLE |
-| Evolution | Implemented | MAP-Elites + reenter；失败消除度量 |
-| Corpus | Scaffold | `corpus-add-pdf` / `corpus-eval-offline`；不发明成功率 |
+| Tier6 Signoff | Deferred | **暂不实现** OpenROAD/sky130；`evaluate_tier6` 恒 UNAVAILABLE |
+| Evolution | Implemented | MAP-Elites + reenter；失败消除度量（OpenEvolve 仍为桥接） |
+| Corpus | Scaffold | 4 条目脚手架；`corpus-add-pdf` / offline batch 写 `evaluated`；不发明成功率 |
 | Scale-out | Prototype | Jaccard 去重 + `LocalWorkerPool`（单机） |
 | Feedback 遥测 | Deferred | **暂不实现**；`NullFeedbackSource` only |
 

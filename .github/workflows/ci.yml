@@ -32,6 +32,8 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: uv sync --extra dev
+      - name: Load paper.toml smoke
+        run: uv run python -c "from pathlib import Path; from archzero.config import load_config; c=load_config(Path('archzero.paper.toml')); assert c.funnel.ensemble_n>=3 and c.funnel.llm_dedicated_sim"
       - name: Paper profile + directed/ensemble
         run: uv run pytest -q -m "directed or ensemble or paper"
         env:

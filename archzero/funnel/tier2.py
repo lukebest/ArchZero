@@ -88,6 +88,24 @@ def _threshold_gate(metrics: dict, th: AcceptanceThresholds) -> tuple[bool, str]
         return False, (
             f"miss_reduction {reduction:.3f} < ACC min {th.min_miss_reduction:.3f}"
         )
+    # BW: accept bw_delta_frac, extra_bw, or bw_overhead aliases from models
+    bw = metrics.get("bw_delta_frac")
+    if bw is None:
+        bw = metrics.get("extra_bw")
+    if bw is None:
+        bw = metrics.get("bw_overhead")
+    if bw is not None and float(bw) > th.max_bw_delta_frac:
+        return False, (
+            f"bw_delta_frac {float(bw):.3f} > ACC max {th.max_bw_delta_frac:.3f}"
+        )
+    if th.area_budget_mm2 is not None:
+        area = metrics.get("area_mm2")
+        if area is None:
+            area = metrics.get("area")
+        if area is not None and float(area) > float(th.area_budget_mm2):
+            return False, (
+                f"area_mm2 {float(area):.3f} > ACC budget {th.area_budget_mm2:.3f}"
+            )
     return True, "acc numeric ok"
 
 

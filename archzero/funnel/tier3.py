@@ -19,6 +19,8 @@ from archzero.models import (
     Verdict,
 )
 from archzero.sim.backend import SimRequest, get_backend
+from archzero.sim.champsim_config import write_champsim_scaffold
+from archzero.sim.gem5_harness import write_gem5_harness
 from archzero.sim.generate import generate_dedicated_sim, generate_dedicated_sim_llm
 from archzero.sim.mechanism_model import report_magic_gap
 from archzero.sim.metrics import SimMetrics
@@ -91,6 +93,17 @@ async def evaluate_tier3(
             family=candidate.family,
         )
     candidate.metrics["t3_dedicated_selftest"] = gen.selftest_ok
+    if cfg.sim.backend == "champsim":
+        sc = write_champsim_scaffold(
+            work,
+            family=candidate.family,
+            knobs=knobs_data,
+            title=candidate.title,
+        )
+        candidate.metrics["t3_champsim_module"] = sc.get("module")
+    if cfg.sim.backend == "gem5":
+        gh = write_gem5_harness(work, knobs=knobs_data)
+        candidate.metrics["t3_gem5_harness"] = gh.get("path")
     candidate.metrics["t3_dedicated_family"] = gen.family
     if gen.selftest_ok and gen.metrics:
         candidate.metrics["t3_dedicated_miss_reduction"] = gen.metrics.get(
@@ -110,6 +123,7 @@ async def evaluate_tier3(
                 "family": candidate.family,
                 "min_miss_reduction": th.min_miss_reduction,
                 "max_bw_delta_frac": th.max_bw_delta_frac,
+                "area_budget_mm2": th.area_budget_mm2,
             },
         )
     )
@@ -117,15 +131,33 @@ async def evaluate_tier3(
 
     reduction = float(sim.metrics.get("miss_reduction") or 0)
     bw = float(sim.metrics.get("bw_delta_frac") or 0)
+    area = sim.metrics.get("area_mm2")
+    if area is None:
+        area = knobs_data.get("area")
     metrics_obj = SimMetrics(
         miss_reduction=reduction,
         bw_delta_frac=bw,
+        area_mm2=float(area) if area is not None else None,
         evidence=str(sim.metrics.get("evidence") or "stub"),
         backend=sim.backend,
     )
     gate_ok = sim.ok and metrics_obj.gate_ok(
-        min_reduction=th.min_miss_reduction, max_bw=th.max_bw_delta_frac
+        min_reduction=th.min_miss_reduction,
+        max_bw=th.max_bw_delta_frac,
+        area_budget_mm2=th.area_budget_mm2,
     )
+
+    # Paper profile: dedicated_sim is adjudicating evidence, not audit-only.
+    if cfg.funnel.llm_dedicated_sim and not gen.selftest_ok:
+        gate_ok = False
+        candidate.metrics["t3_dedicated_adjudication"] = "selftest_fail"
+    elif cfg.funnel.llm_dedicated_sim and gen.selftest_ok and gen.metrics:
+        ded_red = float(gen.metrics.get("miss_reduction") or 0.0)
+        if ded_red < th.min_miss_reduction:
+            gate_ok = False
+            candidate.metrics["t3_dedicated_adjudication"] = "acc_miss"
+        else:
+            candidate.metrics["t3_dedicated_adjudication"] = "ok"
 
     model_red = candidate.metrics.get("t2_miss_reduction")
     gap = report_magic_gap(

@@ -45,3 +45,12 @@ Expect PASS/FAIL from real evidence — never a silent stub PASS when
 
 Corpus offline batch (no ChampSim required): `archzero corpus-eval-offline`.
 
+
+## Mechanism config scaffold
+
+Tier3/ChampSim backend writes under the candidate workdir:
+
+- `champsim_config.json` — JSON intent (family → L2C prefetcher/replacement names)
+- `champsim_patch.json` / `MECHANISM_PATCH.md` — rebuild checklist
+
+This is **not** a compiled mechanism. Rebuild ChampSim after applying real sources.

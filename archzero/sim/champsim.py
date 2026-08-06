@@ -9,6 +9,7 @@ from pathlib import Path
 
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimBackend, SimRequest, SimResult
+from archzero.sim.champsim_config import write_champsim_scaffold
 from archzero.sim.metrics import SimMetrics, TraceMetrics, compute_reduction, geo_mean
 from archzero.sim.parse_champsim import parse_champsim_stdout
 from archzero.sim.stub import StubSimBackend
@@ -83,6 +84,12 @@ class ChampSimBackend(SimBackend):
         bin_path = Path(self.cfg.sim.champsim_bin)  # type: ignore[arg-type]
         traces = resolve_traces(self.cfg, req.suite)
         knobs = self._load_knobs(req.workdir)
+        write_champsim_scaffold(
+            req.workdir,
+            family=str(req.meta.get("family") or knobs.get("family") or ""),
+            knobs=knobs,
+            title=str(req.meta.get("title") or ""),
+        )
 
         if not traces:
             # No traces: mark unavailable rather than fake PASS via stub when strict
@@ -172,9 +179,14 @@ class ChampSimBackend(SimBackend):
             note=note,
             extra={"n_traces": len(traces)},
         )
-        ok = metrics.gate_ok() and all(
-            (t.mpki is not None) for t in per_trace
-        )
+        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
+        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
+        area_budget = req.meta.get("area_budget_mm2")
+        ok = metrics.gate_ok(
+            min_reduction=min_red,
+            max_bw=max_bw,
+            area_budget_mm2=float(area_budget) if area_budget is not None else None,
+        ) and all((t.mpki is not None) for t in per_trace)
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

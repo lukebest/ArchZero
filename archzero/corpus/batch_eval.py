@@ -151,12 +151,25 @@ async def evaluate_corpus_batch(
         entries = entries[: max(0, limit)]
 
     results = []
+    by_id = {str(e.get("id")): e for e in (manifest.get("entries") or [])}
     for entry in entries:
-        results.append(
-            await evaluate_corpus_entry(
-                cfg, entry, corpus_root=root, through=through
-            )
+        row = await evaluate_corpus_entry(
+            cfg, entry, corpus_root=root, through=through
         )
+        results.append(row)
+        # Persist evaluated flag only — never invent cleanroom_label / success_rate.
+        eid = str(entry.get("id") or "")
+        target = by_id.get(eid)
+        if target is not None and row.get("ok"):
+            target["evaluated"] = True
+            target["last_offline_verdict"] = row.get("last_verdict")
+            target["last_offline_tier"] = row.get("last_tier")
+
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     n_ok = sum(1 for r in results if r.get("ok") and r.get("last_verdict") == "pass")
     return {
