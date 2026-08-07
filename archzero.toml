@@ -24,9 +24,14 @@ strict_evidence = true
 ensemble_n = 1
 
 [sim]
-backend = "stub"
+backend = "champsim"
+champsim_bin = "tools/champsim/bin/champsim"
+gem5_bin = "tools/gem5/build/X86/gem5.opt"
+traces_dir = "benchmarks/traces"
 
 [rtl]
+pycircuit_root = "vendor/pycircuit"
+pyc_toolchain_root = ".pycircuit_out/toolchain/install"
 
 [sign]
 enabled = false

@@ -14,5 +14,8 @@ build/
 *.canvas.tsx
 .pycircuit_out/
 tools/champsim/
+tools/gem5/
+.archzero_askpass.sh
 benchmarks/traces/
+m5out/
 # vendor/pycircuit and vendor/openevolve are git submodules when present
