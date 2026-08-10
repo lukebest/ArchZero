@@ -127,6 +127,8 @@ uv run archzero models
 
 ### 3. 注册问题包并跑漏斗
 
+参数含义（`--through` / `--n` / 有无 PDF / 何时扩题与进化）见下文 [CLI 参数说明](#cli-参数说明)。
+
 ```bash
 uv run archzero spec specs/demo.md
 uv run archzero run --spec specs/demo.md --through tier2 --n 8
@@ -141,14 +143,14 @@ uv run archzero ideate path/to/paper.pdf --spec specs/demo.md -o candidates/
 uv run archzero run --spec specs/demo.md --pdf path/to/paper.pdf --through tier4
 ```
 
-扩题后自动再跑漏斗（§5.1 auto-round）：
+扩题后自动再跑漏斗（§5.1 auto-round；**默认关闭**，需显式打开）：
 
 ```bash
 uv run archzero run --spec specs/demo.md --n 5 \
   --expand-frontier --frontier-offline --auto-round 1
 ```
 
-进化搜索（对已进入 Tier2 的候选）：
+进化搜索（**独立命令**，针对已进入 Tier2+ 的候选；不会在 `run` 里自动执行）：
 
 ```bash
 uv run archzero evolve --campaign <campaign_id>
@@ -195,6 +197,112 @@ uv run archzero corpus-eval-offline --through tier2 --limit 3  # FakeLLM 离线�
 
 看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  
 中文快速入门：[`docs/researcher-quickstart.html`](docs/researcher-quickstart.html)（或 `archzero ui` 后打开 `/quickstart.html`）。
+
+---
+
+## CLI 参数说明
+
+全局选项：任意子命令前可加 `-c` / `--config path.toml`（例如论文协议旁路 `archzero.paper.toml`）。  
+常用流程命令：`spec` → `run` →（可选）`frontier` / `evolve` → `report`。完整列表见 `uv run archzero --help`。
+
+### `run`：漏斗主入口
+
+```bash
+uv run archzero run --spec specs/demo.md [--pdf paper.pdf] \
+  --through tier2 --n 8 \
+  [--seed-dir candidates/] \
+  [--expand-frontier] [--frontier-offline] [--auto-round 1] \
+  [--resume <campaign_id>] [--name "..."] [--max-tokens N]
+```
+
+| 参数 | 默认 | 含义 |
+|------|------|------|
+| `--spec` | （必填，除非 `--resume`） | NDF-lite 问题包路径。Generation / Evaluation 都按其中的 CTX/REQ/ACC/DOF 执行 |
+| `--through` | `tier2` | **漏斗停在哪一层**（含该层）。候选从 Tier0 起逐级评估，通过后才进下一层；到 `--through` 后停止。合法值：`tier0`…`tier6`（`tier6` 预留，会得到 `UNAVAILABLE`） |
+| `--n` | `10` | **本轮要生成多少个新候选**（在未提供 `--seed-dir` 时）。有 PDF 时做 N 次 clean-room 出题；无 PDF 时做 N 次「只读问题包」独立出题。已有内容哈希重复的会被去重丢掉 |
+| `--pdf` | 无 | 可选论文 PDF。见下节「有/无 PDF」 |
+| `--seed-dir` | 无 | 若给出目录，则**不再生成**，改为加载其中已有候选 Markdown，直接进漏斗 |
+| `--expand-frontier` | 关 | 漏斗跑完后，按 §5.1 做范式扩题（纵向/横向/基础），从失败信号长出新问题包。**默认不扩题** |
+| `--frontier-offline` | 关 | 扩题时用确定性理论脚手架，不调用 LLM（需同时开 `--expand-frontier`） |
+| `--auto-round N` | `0` | 扩题后，把新问题包再跑漏斗 **N 轮**（仅在开了 `--expand-frontier` 时有意义）。`0` = 只扩题不回流 |
+| `--resume ID` | 无 | 续跑已有 campaign：补跑未完成 / 未硬通过 `--through` 的候选；可同时提高 `--through` |
+| `--name` | 自动 | campaign 显示名 |
+| `--max-tokens` | 无 | 本次进程可选的 Cursor 池 token 上限（写入预算配置） |
+
+#### `--through` 各层在评什么
+
+| 值 | 层 | 作用（简述） |
+|----|-----|--------------|
+| `tier0` | 硬筛 | LLM 快速否决明显不可行 / 非目标越界 |
+| `tier1` | 对抗评审 | 多人设质疑新颖性、正确性、可行性 |
+| `tier2` | 解析模型 | 沙箱定量模型 + verifier；默认日常停在这里 |
+| `tier3` | 定向/轻仿真 | directed / ChampSim 等（缺后端且 `strict_evidence` 时 → `UNAVAILABLE`） |
+| `tier4` | 更重仿真 | 全仿真路径（gem5 等，视配置） |
+| `tier5` | RTL | pyCircuit → Verilog → Verilator |
+| `tier6` | 签核 | **预留**，不跑 OpenROAD |
+
+例：`--through tier4` 表示候选最多评到 Tier4；没通过 Tier2 的不会被送到 Tier3/4。
+
+#### `--n` 与候选从哪来（优先级）
+
+1. `--seed-dir` 有内容 → 只用种子，**忽略** `--n` / `--pdf` 的生成路径  
+2. 否则若给了 `--pdf` → clean-room：读论文 + 对照 `--spec`，生成 `--n` 个机制候选  
+3. 否则（只有 `--spec`）→ 不读论文，仅按问题包条款 / DOF 独立生成 `--n` 个候选  
+
+### 有论文 PDF vs 无论文 PDF
+
+| 场景 | 怎么跑 | Generation 行为 | 适用 |
+|------|--------|-----------------|------|
+| **无 PDF** | `run --spec specs/….md --n 8` | 只根据问题包出题；不依赖某篇基线论文全文 | 自拟问题（如 `specs/noc_request_grant.md`）、纯 DOF 探索 |
+| **有 PDF（一次跑完）** | `run --spec … --pdf paper.pdf --n 8` | Clean-room ideation：论文文本进提示，但仍要求相对问题包独立构思机制 | 对照某篇论文挖改进点，并直接进漏斗 |
+| **有 PDF（分步）** | `read paper.pdf` → `ideate paper.pdf --spec … -o candidates/` → `run --spec … --seed-dir candidates/` | `read` 只做理解笔记；`ideate` 写出候选文件；`run` 用种子评估 | 想先审阅 insights / 候选再决定是否进漏斗 |
+
+要点：
+
+- **PDF 不是漏斗本身的输入**：Evaluation 始终以 `--spec`（NDF）为宪法；PDF 只影响「候选怎么生成」。  
+- **无 PDF 完全合法**：不跑 comprehension/clean-room 论文路径即可。  
+- `read` / `ideate` **必须**给 PDF；`run` 的 `--pdf` 可选。
+
+### 何时扩题（frontier），何时进化（evolve）
+
+二者都是 **漏斗之后的可选步骤**，默认 `run` **不会**自动做。
+
+```
+run（生成 + Tier0…through）
+        │
+        ├─ 可选：--expand-frontier [--auto-round N]   ← 改「问题包 / 范式」
+        │
+        └─ 另开命令：evolve --campaign <id>          ← 改「已有候选机制」
+```
+
+| | **扩题 `frontier` / `run --expand-frontier`** | **进化 `evolve`** |
+|--|-----------------------------------------------|-------------------|
+| **改什么** | 问题空间：新 REQ/DOF/NNG、新范式问题包 | 解空间：在已有候选上变异 / MAP-Elites |
+| **输入** | 问题包 +（可选）某 campaign 的失败信号 | 已有 `campaign_id`，且最好已有进入 **Tier2+** 的候选 |
+| **何时用** | 漏斗大量失败、发现条款有洞、要换理论透镜或换约束再搜一轮 | 已有若干过 Tier2 的机制，想在 DOF 内继续搜更好的变体 |
+| **怎么调用** | 独立：`archzero frontier --spec … [--campaign id] [--offline]`；或挂在 `run`：`--expand-frontier`；回流加 `--auto-round N` | `archzero evolve --campaign <id> [--generations K] [--no-reenter]` |
+| **和 `run` 关系** | 可嵌在同一次 `run` 末尾；`--auto-round` 会用扩出的包再开漏斗 | **不在 `run` 内**；对已有 campaign 另跑。默认 `--reenter`：子代再进 Tier0…`reenter_through`（配置项，默认常为 tier2） |
+
+建议节奏：
+
+1. 先 `run --spec … --through tier2 --n …` 看吞吐与失败分类；  
+2. 失败像「问题设错了 / 范式不对」→ `--expand-frontier` 或 `frontier`；需要自动再评则加 `--auto-round 1`；  
+3. 失败像「机制差一点、DOF 还没搜透」且已有 T2 幸存者 → `evolve --campaign …`；  
+4. 不要指望一次 `run` 同时隐式完成扩题和进化——必须显式打开对应开关或命令。
+
+### 其他高频命令（参数要点）
+
+| 命令 | 关键参数 | 作用 |
+|------|----------|------|
+| `spec PATH` | `--lint/--no-lint`，`--register/--no-register` | 校验并（默认）登记问题包 |
+| `read PDF` | `-o insights.md`，`--personas a,b` | 多专家读论文 → 笔记 |
+| `ideate PDF` | `--spec`，`-o dir`，`--n` | Clean-room 出题到目录（不跑漏斗） |
+| `frontier` | `--spec`，`--campaign`，`--offline`，`-o` | 只做 §5.1 扩题，不跑漏斗 |
+| `evolve` | `--campaign`（必填），`--generations`，`--reenter/--no-reenter` | 进化搜索 + 可选回流 |
+| `report` | `--campaign`，`-o report.md` | 漏斗吞吐 / 失败分类报告 |
+| `status` / `show` | campaign id / candidate id | 查看进度或单个机制全文 |
+| `export` | `--campaign`，`-o bundles/` | 可复现产物包 |
+| `e2e` | `--spec`，`--through`，`--offline/--online` | 离线友好的演示路径（默认可到 tier5） |
 
 ---
 
