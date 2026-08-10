@@ -84,6 +84,10 @@ Return JSON ONLY:
     }
   ]
 }
+
+Prose fields (title, cross_domain_source, isomorphism, why_not_local_optima,
+paradigm_shift_claim, open_questions, new_clauses.text) MUST be native Simplified Chinese.
+Keep kind / theory_lenses / clause id prefixes in English.
 """
 
 

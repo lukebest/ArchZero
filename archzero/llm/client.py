@@ -55,39 +55,35 @@ class CursorLLM:
         return path
 
     def _model_selection(self, routed: RoutedModel) -> Any:
-        try:
-            from cursor_sdk import ModelParameterValue, ModelSelection  # type: ignore
-        except ImportError:
-            return routed.model_id
+        from archzero.llm.model_ids import to_model_selection
 
-        params = []
-        if routed.optimize_for:
-            params.append(
-                ModelParameterValue(id="optimize_for", value=routed.optimize_for)
-            )
-        for pid, pval in (self.cfg.pools.model_params or {}).items():
-            params.append(ModelParameterValue(id=pid, value=pval))
-        if params:
-            return ModelSelection(id=routed.model_id, params=params)
-        return ModelSelection(id=routed.model_id)
+        return to_model_selection(
+            routed.model_id,
+            extra_params=self.cfg.pools.model_params or None,
+            optimize_for=routed.optimize_for,
+        )
 
     async def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
+        import os
+
         from cursor_sdk import AsyncClient  # type: ignore
 
-        api_key = self.cfg.resolved_api_key()
-        # launch_bridge returns an async context manager in current SDK
-        self._bridge_cm = await AsyncClient.launch_bridge(
+        # launch_bridge does not take api_key; auth is via CURSOR_API_KEY /
+        # create_agent(api_key=...). Keep env in sync for bridge fallback.
+        os.environ.setdefault("CURSOR_API_KEY", self.cfg.resolved_api_key())
+        client = await AsyncClient.launch_bridge(
             workspace=str(self.cfg.state_dir),
-            api_key=api_key,
+            allow_api_key_env_fallback=True,
         )
-        self._client = await self._bridge_cm.__aenter__()
+        # Client is itself an async context manager; enter is a no-op identity.
+        self._client = await client.__aenter__()
         return self._client
 
     async def aclose(self) -> None:
-        if self._client is not None and hasattr(self, "_bridge_cm"):
-            await self._bridge_cm.__aexit__(None, None, None)
+        if self._client is not None:
+            await self._client.aclose()
             self._client = None
 
     async def __aenter__(self) -> "CursorLLM":
@@ -117,16 +113,20 @@ class CursorLLM:
         expect_json: bool = False,
     ) -> str:
         """One-shot text completion: persona + context, no durable workspace edits."""
+        from archzero.llm.language import NATIVE_ZH_POLICY
+
         routed = self.router.pick(task)
         self.last_routed = routed
         prompt = (
             f"You are operating under the following persona / system instructions:\n\n"
-            f"{persona.strip()}\n\n---\n\n{context.strip()}"
+            f"{persona.strip()}\n\n---\n\n{NATIVE_ZH_POLICY}\n---\n\n"
+            f"{context.strip()}"
         )
         if expect_json:
             prompt += (
                 "\n\nRespond with a single valid JSON object only. "
-                "No markdown fences."
+                "No markdown fences. "
+                "Human-readable string values in the JSON must be Simplified Chinese."
             )
         return await self._run(prompt, routed, cwd=self.scratch(), work=False)
 
@@ -139,15 +139,18 @@ class CursorLLM:
         cwd: Path,
     ) -> str:
         """Agentic work in a real cwd (write code, run commands)."""
+        from archzero.llm.language import NATIVE_ZH_POLICY
+
         routed = self.router.pick(task)
         self.last_routed = routed
         cwd.mkdir(parents=True, exist_ok=True)
-        self._write_persona_rule(cwd, persona)
+        self._write_persona_rule(cwd, persona + "\n\n" + NATIVE_ZH_POLICY)
         prompt = (
             f"Persona / standing orders:\n{persona.strip()}\n\n"
-            f"---\n\nTask:\n{instruction.strip()}\n\n"
+            f"---\n\n{NATIVE_ZH_POLICY}\n---\n\n"
+            f"Task:\n{instruction.strip()}\n\n"
             "Make the necessary file edits in the current workspace. "
-            "When done, summarize what you changed and any metrics."
+            "When done, summarize in Simplified Chinese what you changed and any metrics."
         )
         return await self._run(prompt, routed, cwd=cwd, work=True)
 
@@ -196,7 +199,7 @@ class CursorLLM:
         model = self._model_selection(routed)
 
         try:
-            from cursor_sdk import LocalAgentOptions  # type: ignore
+            from cursor_sdk import LocalAgentOptions, SandboxOptions  # type: ignore
         except ImportError as exc:
             raise LLMError(
                 "cursor-sdk is not installed. Run: uv sync",
@@ -211,15 +214,28 @@ class CursorLLM:
 
         try:
             client = await self._ensure_client()
+            # Host often lacks bubblewrap/landlock (or has a broken docker.sock
+            # path). Ambient ~/.cursor/sandbox.json may request sandboxing —
+            # force it off so local agents can run in this environment.
             create_kwargs: dict[str, Any] = {
                 "model": model,
                 "api_key": api_key,
                 "local": LocalAgentOptions(
                     cwd=str(cwd),
                     setting_sources=setting_sources,
+                    sandbox_options=SandboxOptions(enabled=False),
                 ),
             }
-            async with await client.agents.create(**create_kwargs) as agent:
+            # cursor-sdk ≥1.x: AsyncClient.create_agent (not client.agents.create)
+            create_agent = getattr(client, "create_agent", None)
+            if create_agent is None and hasattr(client, "agents"):
+                create_agent = client.agents.create
+            if create_agent is None:
+                raise LLMError(
+                    "cursor-sdk AsyncClient missing create_agent; upgrade cursor-sdk",
+                    startup=True,
+                )
+            async with await create_agent(**create_kwargs) as agent:
                 agent_id = getattr(agent, "agent_id", None) or getattr(
                     agent, "agentId", None
                 )

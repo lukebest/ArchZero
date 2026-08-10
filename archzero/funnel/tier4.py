@@ -22,9 +22,10 @@ from archzero.models import (
 from archzero.sim.backend import SimRequest, get_backend
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
-JUDGE_PERSONA = """You are the final simulation adjudicator for an architecture funnel.
-Given problem acceptance criteria and simulation metrics, decide pass/fail.
-Return JSON: {verdict: pass|fail, score:0-1, summary, clause_refs:[]}"""
+JUDGE_PERSONA = """你是体系结构漏斗的仿真终审。
+根据验收条款与仿真指标裁定 pass/fail。
+只返回 JSON：{verdict: pass|fail, score:0-1, summary, clause_refs:[]}
+summary 必须原生简体中文；verdict 保持英文枚举。"""
 
 
 def _parse_json(text: str) -> dict:

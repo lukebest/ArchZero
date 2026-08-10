@@ -3,219 +3,697 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ArchZero · Idea Factory</title>
+<title>ArchZero · 研究员看板</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --ink: #1a1a1a;
-    --muted: #5a5a5a;
-    --line: #e5e5e5;
-    --bg: #f4f2ec;
-    --panel: #fffdf8;
-    --accent: #0b3d5c;
-    --pass: #1f6b3a;
-    --fail: #8b2e2e;
-    --soft: #e8f1f6;
+    --ink: #0f1720;
+    --muted: #5c6b7a;
+    --line: #d7dde5;
+    --bg0: #eef2f6;
+    --bg1: #f7f9fb;
+    --panel: #ffffff;
+    --accent: #0f6e56;
+    --accent-soft: #d8f0e8;
+    --warn: #9a6700;
+    --warn-soft: #fff3cd;
+    --pass: #0f6e56;
+    --pass-soft: #d8f0e8;
+    --fail: #b42318;
+    --fail-soft: #fce8e6;
+    --info: #175cd3;
+    --info-soft: #dcecff;
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.04);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: "Noto Sans SC", system-ui, sans-serif;
     color: var(--ink);
+    font-family: "Noto Sans SC", "IBM Plex Sans", system-ui, sans-serif;
     background:
-      radial-gradient(900px 400px at 10% -10%, #dce9f2 0%, transparent 55%),
-      radial-gradient(700px 320px at 100% 0%, #efe6d6 0%, transparent 50%),
-      var(--bg);
+      linear-gradient(180deg, #e7eef5 0%, var(--bg0) 28%, var(--bg1) 100%);
     min-height: 100vh;
   }
-  header {
-    padding: 2rem 2rem 1rem;
-    border-bottom: 1px solid var(--line);
+  a { color: var(--accent); }
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
   }
-  header .brand {
-    font-family: "Source Serif 4", Georgia, serif;
-    font-size: 2rem;
+
+  .shell {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 1.25rem 1.25rem 2.5rem;
+  }
+  @media (min-width: 960px) {
+    .shell { padding: 1.5rem 2rem 3rem; }
+  }
+
+  header.top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 1.25rem;
+  }
+  .brand-block h1 {
+    margin: 0;
+    font-size: clamp(1.6rem, 2.4vw, 2rem);
     font-weight: 700;
     letter-spacing: -0.02em;
-    color: var(--accent);
   }
-  header p { margin: 0.4rem 0 0; color: var(--muted); max-width: 52rem; line-height: 1.5; }
-  main {
+  .brand-block p {
+    margin: 0.35rem 0 0;
+    color: var(--muted);
+    max-width: 40rem;
+    line-height: 1.55;
+    font-size: 0.95rem;
+  }
+  .top-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 0.5rem 0.8rem;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .btn:hover { border-color: #b8c4d1; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn.ghost { box-shadow: none; background: transparent; }
+
+  .howto {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.1rem;
+    box-shadow: var(--shadow);
     display: grid;
-    grid-template-columns: 280px 1fr;
-    gap: 1.25rem;
-    padding: 1.25rem 2rem 2rem;
+    gap: 0.55rem;
   }
-  @media (max-width: 900px) {
-    main { grid-template-columns: 1fr; }
+  .howto strong { color: var(--accent); }
+  .howto ol {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.55;
   }
+  .howto details summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  .howto details summary::-webkit-details-marker { display: none; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  @media (max-width: 960px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
   .panel {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 1rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 1rem 1.1rem;
   }
-  h2 {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+  .panel-hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .panel-hd h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+  .hint {
     color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
     margin: 0 0 0.75rem;
   }
+
+  .camp-list { display: grid; gap: 0.45rem; }
   .camp {
-    display: block;
     width: 100%;
     text-align: left;
-    border: 1px solid transparent;
-    background: transparent;
-    padding: 0.65rem 0.7rem;
-    margin-bottom: 0.35rem;
+    border: 1px solid var(--line);
+    background: var(--bg1);
+    border-radius: 10px;
+    padding: 0.7rem 0.75rem;
     cursor: pointer;
-    border-radius: 3px;
     font: inherit;
+    transition: border-color .15s, background .15s;
   }
-  .camp:hover, .camp.active { background: var(--soft); border-color: #c5d8e4; }
-  .camp .name { font-weight: 600; display: block; }
-  .camp .meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.15rem; }
+  .camp:hover { border-color: #b7c7d6; }
+  .camp.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .camp .name {
+    display: block;
+    font-weight: 600;
+    font-size: 0.92rem;
+    line-height: 1.35;
+  }
+  .camp .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    padding: 0.12rem 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: #e8edf3;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge.ok { background: var(--pass-soft); color: var(--pass); }
+  .badge.bad { background: var(--fail-soft); color: var(--fail); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.info { background: var(--info-soft); color: var(--info); }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 800px) {
+    .summary { grid-template-columns: repeat(2, 1fr); }
+  }
+  .stat {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem;
+    background: linear-gradient(180deg, #fff, var(--bg1));
+  }
+  .stat .label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .stat .value {
+    margin-top: 0.25rem;
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .stat .sub {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
   .funnel {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 0.5rem;
-    margin-bottom: 1.25rem;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin-bottom: 0.35rem;
   }
   @media (max-width: 900px) {
     .funnel { grid-template-columns: repeat(3, 1fr); }
   }
   .tier {
-    background: #f7fafc;
+    position: relative;
     border: 1px solid var(--line);
-    padding: 0.7rem;
-    border-radius: 3px;
+    border-radius: 10px;
+    padding: 0.7rem 0.65rem;
+    background: #fff;
+    min-height: 6.2rem;
   }
-  .tier .t { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: var(--accent); }
-  .tier .n { font-size: 1.4rem; font-weight: 700; margin: 0.2rem 0; }
-  .tier .s { font-size: 0.75rem; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
-  th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; color: var(--muted); font-weight: 600; }
-  .pill {
-    display: inline-block;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 2px;
-    background: #eee;
-  }
-  .pill.pass { background: #e3f4e8; color: var(--pass); }
-  .pill.fail { background: #f8e6e6; color: var(--fail); }
-  .empty { color: var(--muted); padding: 1.5rem 0; }
-  footer {
-    padding: 0 2rem 2rem;
-    color: var(--muted);
-    font-size: 0.82rem;
-  }
-  a { color: var(--accent); }
-  #detail {
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
-    display: none;
-  }
-  #detail pre {
-    white-space: pre-wrap;
-    background: #f7fafc;
-    border: 1px solid var(--line);
-    padding: 0.8rem;
+  .tier::after {
+    content: "→";
+    position: absolute;
+    right: -0.42rem;
+    top: 42%;
+    color: #9aa8b7;
     font-size: 0.85rem;
-    max-height: 280px;
-    overflow: auto;
+    z-index: 1;
   }
-  .failbars { margin: 0.5rem 0 1.25rem; }
-  .failrow { display: grid; grid-template-columns: 110px 1fr 2.5rem; gap: 0.5rem; align-items: center; margin: 0.35rem 0; font-size: 0.85rem; }
-  .failrow .bar { height: 0.55rem; background: #f0e4e4; border-radius: 2px; overflow: hidden; }
-  .failrow .bar > i { display: block; height: 100%; background: var(--fail); }
+  .tier:nth-child(3n)::after,
+  .tier:last-child::after { content: ""; }
+  @media (min-width: 901px) {
+    .tier:nth-child(3n)::after { content: "→"; }
+    .tier:last-child::after { content: ""; }
+  }
+  .tier .t-name {
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .tier .t-id {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+  }
+  .tier .rate {
+    margin-top: 0.45rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .tier .nums {
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .tier .bar {
+    margin-top: 0.45rem;
+    height: 4px;
+    background: #e8edf3;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .tier .bar > i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .tier.cold { opacity: 0.55; }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin: 0.35rem 0 1rem;
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 900px) {
+    .split { grid-template-columns: 1fr; }
+  }
+
+  .failrow {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr 2rem;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.4rem 0;
+    font-size: 0.85rem;
+  }
+  .failrow .bar {
+    height: 0.55rem;
+    background: #f3e4e2;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .failrow .bar > i {
+    display: block;
+    height: 100%;
+    background: var(--fail);
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.7rem;
+  }
+  .tab {
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .tab.active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+  }
+
+  .cand-list { display: grid; gap: 0.45rem; }
+  .cand {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem;
+    cursor: pointer;
+    background: #fff;
+    transition: border-color .15s, background .15s;
+  }
+  .cand:hover { border-color: #b7c7d6; background: var(--bg1); }
+  .cand.active { border-color: var(--info); background: var(--info-soft); }
+  .cand .row1 {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+  .cand .title { font-weight: 600; line-height: 1.35; }
+  .cand .sub {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .cand .snippet {
+    margin-top: 0.45rem;
+    font-size: 0.82rem;
+    color: #3d4b59;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  #detail {
+    display: none;
+    margin-top: 1rem;
+    border-top: 1px dashed var(--line);
+    padding-top: 1rem;
+  }
+  .timeline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.6rem 0;
+  }
+  .tl {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.78rem;
+    background: var(--bg1);
+  }
+  .tl.pass { border-color: #9fd0bc; background: var(--pass-soft); }
+  .tl.fail { border-color: #efb4ae; background: var(--fail-soft); }
+  pre.mech {
+    white-space: pre-wrap;
+    background: #f4f7fa;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.85rem;
+    font-size: 0.84rem;
+    line-height: 1.5;
+    max-height: 320px;
+    overflow: auto;
+    margin: 0.5rem 0 0;
+  }
+
+  .empty {
+    color: var(--muted);
+    padding: 1rem 0.2rem;
+    font-size: 0.9rem;
+    line-height: 1.55;
+  }
+  footer {
+    margin-top: 1.25rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+  }
+  #compare-panel {
+    display: none;
+    margin-bottom: 1rem;
+  }
+  table.cmp {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  table.cmp th, table.cmp td {
+    text-align: left;
+    padding: 0.45rem 0.35rem;
+    border-bottom: 1px solid var(--line);
+  }
+  table.cmp th {
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">ArchZero</div>
-  <p>Idea Factory 看板 — Generation + Tier0–5 Evaluation（对照 arXiv:2604.03312）。遥测 Feedback 层暂缓。</p>
-</header>
-<main>
-  <aside class="panel">
-    <h2>Campaigns</h2>
-    <div id="campaigns"><div class="empty">加载中…</div></div>
-    <h2 style="margin-top:1.25rem">Compare</h2>
-    <p style="font-size:0.8rem;color:var(--muted);margin:0 0 0.5rem">勾选两个 campaign 对比漏斗</p>
-    <div id="compare-picks" style="font-size:0.85rem;color:var(--muted)">未选择</div>
-    <button id="compare-btn" class="camp" style="margin-top:0.5rem;border:1px solid var(--line)" disabled>运行对比</button>
-  </aside>
-  <section class="panel">
-    <div id="compare-panel" style="display:none;margin-bottom:1.25rem">
-      <h2>Campaign compare</h2>
-      <div id="compare-body"></div>
+<div class="shell">
+  <header class="top">
+    <div class="brand-block">
+      <h1>ArchZero 研究员看板</h1>
+      <p>一眼看懂：本轮跑了哪些想法、漏斗卡在哪一层、主要因为什么失败。对照论文 Generation → Tier0–5 Evaluation。</p>
     </div>
-    <h2>Funnel</h2>
-    <div id="funnel" class="funnel"><div class="empty">选择左侧 campaign</div></div>
-    <h2>Failure taxonomy</h2>
-    <div id="failures" class="failbars"><div class="empty">—</div></div>
-    <h3 style="margin-top:1rem">Failure elimination</h3>
-    <div id="eliminationBox" class="empty">—</div>
-    <h2>Candidates</h2>
-    <div id="cands"><div class="empty">—</div></div>
-    <div id="detail">
-      <h2>Candidate detail</h2>
-      <div id="detail-body"></div>
+    <div class="top-actions">
+      <a class="btn ghost" href="/quickstart.html">快速入门</a>
+      <button class="btn" id="refresh-btn" type="button">刷新</button>
     </div>
+  </header>
+
+  <section class="howto">
+    <details open>
+      <summary>怎么读这个看板？</summary>
+      <ol>
+        <li><strong>左栏选一轮实验（Campaign）</strong> —— 一次 <code>archzero run</code> 就是一轮。</li>
+        <li><strong>看顶部四格摘要</strong> —— 候选数 / 活到终点的数量 / 停在哪一层 / 头号失败原因。</li>
+        <li><strong>漏斗从左到右</strong> —— 硬筛 → 对抗评审 → 解析模型 → 仿真 → RTL。数字是「通过 / 进入」。</li>
+        <li><strong>点开候选</strong> —— 看机制说明与各层裁决。需要对比两轮时，勾选两个 Campaign 再点「对比」。</li>
+      </ol>
+    </details>
   </section>
-</main>
-<footer>
-  <span id="meta"></span>
-  · CLI: <code>archzero ui</code> ·
-  <a href="/quickstart.html">研究员快速入门</a> ·
-  <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noreferrer">paper</a>
-</footer>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="panel-hd">
+        <h2>实验轮次</h2>
+        <span class="badge info" id="camp-count">0</span>
+      </div>
+      <p class="hint">一次 <code>run</code> = 一轮。点选后右侧展示漏斗与候选。</p>
+      <div id="campaigns" class="camp-list"><div class="empty">加载中…</div></div>
+
+      <div class="panel-hd" style="margin-top:1.25rem">
+        <h2>对比两轮</h2>
+      </div>
+      <p class="hint">勾选正好 2 个轮次，看漏斗通过量差。</p>
+      <div id="compare-picks" class="hint">尚未勾选</div>
+      <button id="compare-btn" class="btn primary" style="width:100%;margin-top:0.5rem" disabled>对比所选轮次</button>
+    </aside>
+
+    <section>
+      <div id="compare-panel" class="panel">
+        <div class="panel-hd"><h2>轮次对比</h2><button class="btn ghost" id="close-compare" type="button">关闭</button></div>
+        <div id="compare-body"></div>
+      </div>
+
+      <div class="panel" id="main-panel">
+        <div class="panel-hd">
+          <h2 id="camp-title">选择左侧一轮实验</h2>
+          <span class="badge" id="camp-status">—</span>
+        </div>
+        <p class="hint" id="camp-sub">还没有选中 Campaign。</p>
+
+        <div class="summary" id="summary">
+          <div class="stat"><div class="label">候选想法</div><div class="value">—</div><div class="sub">本轮生成/导入</div></div>
+          <div class="stat"><div class="label">活到终点</div><div class="value">—</div><div class="sub">通过目标层</div></div>
+          <div class="stat"><div class="label">评估深度</div><div class="value" style="font-size:1.1rem">—</div><div class="sub">--through</div></div>
+          <div class="stat"><div class="label">头号失败</div><div class="value" style="font-size:1.05rem">—</div><div class="sub">失败分类</div></div>
+        </div>
+
+        <div class="panel-hd"><h2>评估漏斗</h2></div>
+        <p class="hint">从左到右越评越严。绿色占比 = 通过率。灰色层表示本轮几乎没人进入。</p>
+        <div id="funnel" class="funnel"><div class="empty" style="grid-column:1/-1">选择左侧 campaign</div></div>
+        <div class="legend">
+          <span><span class="badge ok">通过</span> 进入下一层</span>
+          <span><span class="badge bad">失败</span> 在该层被淘汰</span>
+          <span>数字格式：<span class="mono">通过/进入</span></span>
+        </div>
+
+        <div class="split">
+          <div>
+            <div class="panel-hd"><h2>失败原因分布</h2></div>
+            <p class="hint">同一候选可能有多条失败记录。用于决定下一步是改问题包（扩题）还是继续搜机制（进化）。</p>
+            <div id="failures"><div class="empty">—</div></div>
+          </div>
+          <div>
+            <div class="panel-hd"><h2>进化/回流摘要</h2></div>
+            <p class="hint">仅在跑过 <code>evolve</code> 后才有。显示消除了哪些失败类型。</p>
+            <div id="eliminationBox" class="empty">本轮尚未记录进化消除数据</div>
+            <div class="panel-hd" style="margin-top:1rem"><h2>用量</h2></div>
+            <div id="usageBox" class="empty">—</div>
+          </div>
+        </div>
+
+        <div class="panel-hd" style="margin-top:0.5rem">
+          <h2>候选想法列表</h2>
+        </div>
+        <div class="tabs" id="cand-tabs">
+          <button class="tab active" data-filter="all" type="button">全部</button>
+          <button class="tab" data-filter="pass" type="button">仍存活/通过</button>
+          <button class="tab" data-filter="fail" type="button">已失败</button>
+        </div>
+        <div id="cands" class="cand-list"><div class="empty">—</div></div>
+
+        <div id="detail">
+          <div class="panel-hd">
+            <h2>候选详情</h2>
+            <button class="btn ghost" id="close-detail" type="button">收起</button>
+          </div>
+          <div id="detail-body"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <span id="meta"></span>
+    <span>CLI：<code>archzero ui</code></span>
+    <a href="https://arxiv.org/abs/2604.03312" target="_blank" rel="noreferrer">论文 arXiv:2604.03312</a>
+  </footer>
+</div>
+
 <script>
+const TIER_LABELS = {
+  tier0: { name: "硬筛", tip: "快速否决明显不可行" },
+  tier1: { name: "对抗评审", tip: "多人设质疑新颖性/正确性" },
+  tier2: { name: "解析模型", tip: "定量模型与验收门槛" },
+  tier3: { name: "定向仿真", tip: "directed / ChampSim 等" },
+  tier4: { name: "全仿真", tip: "更重仿真路径" },
+  tier5: { name: "RTL", tip: "pyCircuit / Verilator" },
+  tier6: { name: "签核", tip: "预留，暂不执行" },
+};
+
+const FAIL_LABELS = {
+  physics: "物理/带宽边界",
+  novelty: "新颖性不足",
+  correctness: "正确性存疑",
+  performance: "性能不达",
+  feasibility: "实现不可行",
+  equivalence: "等价性失败",
+  tooling: "工具链缺失",
+  budget: "预算耗尽",
+  unknown: "未分类",
+};
+
+const STATUS_LABELS = {
+  running: "进行中",
+  done: "已完成",
+  failed: "失败",
+  active: "进行中",
+  new: "新建",
+};
+
+let compareSel = [];
+let currentCandidates = [];
+let currentFilter = "all";
+let activeCampId = null;
+
 async function j(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-function pill(v) {
-  if (!v) return "";
-  const cls = v === "pass" ? "pass" : v === "fail" ? "fail" : "";
-  return `<span class="pill ${cls}">${v}</span>`;
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  })[ch]);
 }
 
-const compareSel = [];
+function shortId(id) {
+  if (!id) return "—";
+  return id.length > 14 ? id.slice(0, 12) + "…" : id;
+}
+
+function statusBadge(status) {
+  const label = STATUS_LABELS[status] || status || "—";
+  const cls = status === "done" ? "ok" : (status === "failed" ? "bad" : "warn");
+  return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function verdictBadge(v) {
+  if (!v) return `<span class="badge">未评估</span>`;
+  if (v === "pass") return `<span class="badge ok">通过</span>`;
+  if (v === "fail") return `<span class="badge bad">失败</span>`;
+  if (v === "unavailable") return `<span class="badge warn">不可用</span>`;
+  return `<span class="badge">${escapeHtml(v)}</span>`;
+}
+
+function failLabel(kind) {
+  return FAIL_LABELS[kind] || kind || "—";
+}
 
 function refreshComparePicks() {
   const label = document.getElementById("compare-picks");
   const btn = document.getElementById("compare-btn");
-  label.textContent = compareSel.length
-    ? compareSel.map((id, i) => `${i ? "B" : "A"}=${id}`).join(" · ")
-    : "未选择";
+  if (!compareSel.length) {
+    label.textContent = "尚未勾选";
+  } else {
+    label.innerHTML = compareSel.map((id, i) =>
+      `<span class="badge info">${i ? "B" : "A"} · ${escapeHtml(shortId(id))}</span>`
+    ).join(" ");
+  }
   btn.disabled = compareSel.length !== 2;
 }
 
 async function loadCampaigns() {
   const camps = await j("/api/campaigns");
+  document.getElementById("camp-count").textContent = String(camps.length);
   const el = document.getElementById("campaigns");
   if (!camps.length) {
-    el.innerHTML = '<div class="empty">尚无 campaign。<br/>离线示例：<code>archzero seed-demo</code><br/>或实跑：<code>archzero run --spec specs/demo.md</code></div>';
+    el.innerHTML = `<div class="empty">
+      还没有任何实验轮次。<br/><br/>
+      离线示例：<code>uv run archzero seed-demo</code><br/>
+      实跑：<code>uv run archzero run --spec specs/demo.md --n 5</code>
+    </div>`;
     return;
   }
   el.innerHTML = camps.map(c => `
-    <div style="display:flex;gap:0.35rem;align-items:flex-start;margin-bottom:0.35rem">
-      <input type="checkbox" class="cmp" data-id="${c.id}" style="margin-top:0.85rem" />
-      <button class="camp" data-id="${c.id}" style="flex:1;margin:0">
-        <span class="name">${c.name}</span>
-        <span class="meta">${c.id} · ${c.n_candidates} candidates · ${c.status}</span>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:0.45rem;align-items:stretch">
+      <label style="display:flex;align-items:center;padding:0 0.15rem" title="勾选以对比">
+        <input type="checkbox" class="cmp" data-id="${escapeHtml(c.id)}" />
+      </label>
+      <button class="camp" data-id="${escapeHtml(c.id)}" type="button">
+        <span class="name">${escapeHtml(c.name)}</span>
+        <span class="meta">
+          ${statusBadge(c.status)}
+          <span class="badge">${escapeHtml(c.n_candidates)} 候选</span>
+          <span class="badge info">到 ${escapeHtml(c.through)}</span>
+          <span class="mono">${escapeHtml(shortId(c.id))}</span>
+        </span>
       </button>
     </div>`).join("");
+
   el.querySelectorAll("button.camp").forEach(btn => {
     btn.addEventListener("click", () => {
       el.querySelectorAll("button.camp").forEach(b => b.classList.remove("active"));
@@ -239,8 +717,10 @@ async function loadCampaigns() {
       refreshComparePicks();
     });
   });
-  document.getElementById("compare-btn").onclick = runCompare;
-  el.querySelector("button.camp")?.click();
+
+  const prefer = camps.find(c => c.id === activeCampId) || camps[0];
+  const btn = el.querySelector(`button.camp[data-id="${CSS.escape(prefer.id)}"]`);
+  btn?.click();
 }
 
 async function runCompare() {
@@ -248,108 +728,300 @@ async function runCompare() {
   const data = await j(`/api/compare?a=${encodeURIComponent(compareSel[0])}&b=${encodeURIComponent(compareSel[1])}`);
   const panel = document.getElementById("compare-panel");
   panel.style.display = "block";
-  const rows = data.funnel.map(r => `
-    <tr>
-      <td><code>${r.tier}</code></td>
+  const rows = data.funnel.map(r => {
+    const lab = TIER_LABELS[r.tier]?.name || r.tier;
+    return `<tr>
+      <td>${escapeHtml(lab)} <span class="mono" style="color:var(--muted)">${escapeHtml(r.tier)}</span></td>
       <td>${r.a.passed}/${r.a.entered}</td>
       <td>${r.b.passed}/${r.b.entered}</td>
       <td>${r.pass_delta >= 0 ? "+" : ""}${r.pass_delta}</td>
       <td>${r.fail_delta >= 0 ? "+" : ""}${r.fail_delta}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   const fails = (data.failures || []).map(r => `
-    <tr><td><code>${r.kind}</code></td><td>${r.a}</td><td>${r.b}</td><td>${r.delta >= 0 ? "+" : ""}${r.delta}</td></tr>`).join("");
+    <tr>
+      <td>${escapeHtml(failLabel(r.kind))}</td>
+      <td>${r.a}</td><td>${r.b}</td>
+      <td>${r.delta >= 0 ? "+" : ""}${r.delta}</td>
+    </tr>`).join("");
   document.getElementById("compare-body").innerHTML = `
-    <p style="font-size:0.9rem;color:var(--muted)">
-      <strong>A</strong> ${escapeHtml(data.a.name)} (survivors=${data.a.survivors}) ·
-      <strong>B</strong> ${escapeHtml(data.b.name)} (survivors=${data.b.survivors})
+    <p class="hint">
+      <strong>A</strong> ${escapeHtml(data.a.name)}（存活 ${data.a.survivors}） ·
+      <strong>B</strong> ${escapeHtml(data.b.name)}（存活 ${data.b.survivors}）
     </p>
-    <table>
-      <thead><tr><th>tier</th><th>A pass/enter</th><th>B pass/enter</th><th>Δpass</th><th>Δfail</th></tr></thead>
+    <table class="cmp">
+      <thead><tr><th>层</th><th>A 通过/进入</th><th>B 通过/进入</th><th>Δ通过</th><th>Δ失败</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <h2 style="margin-top:1rem">Failure Δ</h2>
-    <table>
-      <thead><tr><th>kind</th><th>A</th><th>B</th><th>Δ</th></tr></thead>
-      <tbody>${fails || '<tr><td colspan="4">无失败</td></tr>'}</tbody>
+    <div class="panel-hd" style="margin-top:1rem"><h2>失败类型差</h2></div>
+    <table class="cmp">
+      <thead><tr><th>原因</th><th>A</th><th>B</th><th>Δ</th></tr></thead>
+      <tbody>${fails || '<tr><td colspan="4">无失败差异</td></tr>'}</tbody>
     </table>`;
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderSummary(data) {
+  const s = data.summary || {};
+  const through = s.through || data.campaign?.through || "—";
+  const throughName = TIER_LABELS[through]?.name || through;
+  const top = s.top_failure_kind ? failLabel(s.top_failure_kind) : "无失败";
+  const box = document.getElementById("summary");
+  box.innerHTML = `
+    <div class="stat">
+      <div class="label">候选想法</div>
+      <div class="value">${s.n_candidates ?? 0}</div>
+      <div class="sub">本轮生成或导入</div>
+    </div>
+    <div class="stat">
+      <div class="label">活到终点</div>
+      <div class="value">${s.survivors ?? 0}</div>
+      <div class="sub">通过 ${escapeHtml(throughName)}（${escapeHtml(through)}）</div>
+    </div>
+    <div class="stat">
+      <div class="label">评估深度</div>
+      <div class="value" style="font-size:1.15rem">${escapeHtml(throughName)}</div>
+      <div class="sub">对应 CLI --through ${escapeHtml(through)}</div>
+    </div>
+    <div class="stat">
+      <div class="label">头号失败</div>
+      <div class="value" style="font-size:1.05rem">${escapeHtml(top)}</div>
+      <div class="sub">${s.failed ?? 0} 个候选曾失败</div>
+    </div>`;
+}
+
+function renderFunnel(funnel) {
+  const el = document.getElementById("funnel");
+  const tiers = (funnel || []).filter(t => t.tier !== "tier6");
+  if (!tiers.length) {
+    el.innerHTML = `<div class="empty" style="grid-column:1/-1">暂无漏斗数据</div>`;
+    return;
+  }
+  el.innerHTML = tiers.map(t => {
+    const meta = TIER_LABELS[t.tier] || { name: t.tier, tip: "" };
+    const rate = t.entered ? Math.round(100 * t.passed / t.entered) : 0;
+    const cold = t.entered === 0 ? "cold" : "";
+    return `<div class="tier ${cold}" title="${escapeHtml(meta.tip)}">
+      <div class="t-name">${escapeHtml(meta.name)}</div>
+      <div class="t-id">${escapeHtml(t.tier)}</div>
+      <div class="rate">${t.entered ? rate + "%" : "—"}</div>
+      <div class="nums">${t.passed} 通过 / ${t.entered} 进入 · 失败 ${t.failed}</div>
+      <div class="bar"><i style="width:${rate}%"></i></div>
+    </div>`;
+  }).join("");
+}
+
+function renderFailures(failures) {
+  const counts = {};
+  (failures || []).forEach(f => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
+  const kinds = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const maxF = kinds.length ? kinds[0][1] : 1;
+  const el = document.getElementById("failures");
+  if (!kinds.length) {
+    el.innerHTML = `<div class="empty">本轮没有失败记录 —— 要么全过，要么还没跑完。</div>`;
+    return;
+  }
+  el.innerHTML = kinds.map(([k, v]) => `
+    <div class="failrow">
+      <span title="${escapeHtml(k)}">${escapeHtml(failLabel(k))}</span>
+      <div class="bar"><i style="width:${(100 * v / maxF).toFixed(0)}%"></i></div>
+      <span>${v}</span>
+    </div>`).join("");
+}
+
+function renderElimination(elim) {
+  const elimEl = document.getElementById("eliminationBox");
+  if (elim && (elim.kinds_eliminated || elim.kind_elimination_rate != null)) {
+    elimEl.className = "";
+    elimEl.innerHTML = `<div style="font-size:0.88rem;line-height:1.55">
+      <div>已消除类型：<strong>${escapeHtml((elim.kinds_eliminated || []).map(failLabel).join("、") || "—")}</strong></div>
+      <div>有所减少：<strong>${escapeHtml((elim.kinds_reduced || []).map(failLabel).join("、") || "—")}</strong></div>
+      <div>消除率：<code>${escapeHtml(String(elim.kind_elimination_rate ?? "—"))}</code></div>
+    </div>`;
+  } else {
+    elimEl.className = "empty";
+    elimEl.textContent = "本轮尚未记录进化消除数据（先 run，再 evolve 后会出现）";
+  }
+}
+
+function renderUsage(usage) {
+  const el = document.getElementById("usageBox");
+  if (!usage || (!usage.cursor && !usage.other && !Object.keys(usage).length)) {
+    el.className = "empty";
+    el.textContent = "暂无用量统计";
+    return;
+  }
+  el.className = "";
+  const entries = Object.entries(usage);
+  el.innerHTML = `<div style="font-size:0.85rem;line-height:1.55">
+    ${entries.map(([k, v]) => {
+      if (v && typeof v === "object") {
+        const poolName = k === "cursor" ? "Cursor 池" : (k === "other" ? "Other 池" : k);
+        return `<div><strong>${escapeHtml(poolName)}</strong>：${escapeHtml(String(v.tokens ?? 0))} tokens · ${escapeHtml(String(v.calls ?? 0))} 次调用</div>`;
+      }
+      return `<div><strong>${escapeHtml(k)}</strong>：${escapeHtml(String(v))}</div>`;
+    }).join("")}
+  </div>`;
+}
+
+function candidateBucket(c) {
+  if (c.last_verdict === "fail" || c.status === "failed") return "fail";
+  if (c.last_verdict === "pass" || c.status === "active" || c.status === "new") return "pass";
+  return "all";
+}
+
+function renderCandidates() {
+  const el = document.getElementById("cands");
+  const list = currentCandidates.filter(c => {
+    if (currentFilter === "all") return true;
+    if (currentFilter === "fail") return candidateBucket(c) === "fail";
+    return candidateBucket(c) !== "fail";
+  });
+  if (!list.length) {
+    el.innerHTML = `<div class="empty">当前筛选下没有候选。</div>`;
+    return;
+  }
+  el.innerHTML = list.map(c => {
+    const tierMeta = TIER_LABELS[c.last_tier] || {};
+    const tierName = tierMeta.name ? `${tierMeta.name} · ${c.last_tier}` : (c.last_tier || "未评估");
+    return `<article class="cand" data-cid="${escapeHtml(c.id)}">
+      <div class="row1">
+        <div class="title">${escapeHtml(c.title || "未命名机制")}</div>
+        ${verdictBadge(c.last_verdict)}
+      </div>
+      <div class="sub">
+        <span class="badge">${escapeHtml(c.family || "unclassified")}</span>
+        <span class="badge info">${escapeHtml(tierName)}</span>
+        ${c.score != null ? `<span class="badge">分 ${escapeHtml(String(c.score))}</span>` : ""}
+        ${c.failures ? `<span class="badge bad">${c.failures} 条失败</span>` : ""}
+        <span class="mono">${escapeHtml(shortId(c.id))}</span>
+      </div>
+      <div class="snippet">${escapeHtml((/[\u4e00-\u9fff]/.test(c.mechanism || "") ? c.mechanism : (c.mechanism_zh || c.mechanism)) || "（无机制摘要）")}</div>
+    </article>`;
+  }).join("");
+
+  el.querySelectorAll(".cand").forEach(card => {
+    card.addEventListener("click", () => {
+      el.querySelectorAll(".cand").forEach(x => x.classList.remove("active"));
+      card.classList.add("active");
+      showCandidate(card.dataset.cid);
+    });
+  });
 }
 
 async function loadDetail(id) {
+  activeCampId = id;
   const data = await j(`/api/campaigns/${id}`);
-  document.getElementById("funnel").innerHTML = data.funnel.map(t => `
-    <div class="tier">
-      <div class="t">${t.tier}</div>
-      <div class="n">${t.passed}<span style="font-size:0.85rem;color:var(--muted)">/${t.entered}</span></div>
-      <div class="s">fail ${t.failed}</div>
-    </div>`).join("");
+  document.querySelector("#main-panel .panel-hd").innerHTML = `
+    <h2 id="camp-title">${escapeHtml(data.campaign.name || id)}</h2>
+    ${statusBadge(data.campaign.status)}
+  `;
+  document.getElementById("camp-sub").innerHTML =
+    `问题包 <code>${escapeHtml(data.campaign.problem_id || "—")}</code> ·
+     目标层 <code>${escapeHtml(data.campaign.through)}</code>
+     （${escapeHtml(TIER_LABELS[data.campaign.through]?.name || "")}） ·
+     id <code>${escapeHtml(data.campaign.id)}</code>`;
 
-  const counts = {};
-  (data.failures || []).forEach(f => { counts[f.kind] = (counts[f.kind] || 0) + 1; });
-  const kinds = Object.entries(counts).sort((a,b) => b[1]-a[1]);
-  const maxF = kinds.length ? kinds[0][1] : 1;
-  const elim = data.elimination;
-  const elimEl = document.getElementById("eliminationBox");
-  if (elimEl) {
-    if (elim && (elim.kinds_eliminated || elim.kind_elimination_rate != null)) {
-      elimEl.className = "";
-      elimEl.innerHTML = `<div style="font-size:0.85rem">
-        eliminated: <code>${(elim.kinds_eliminated||[]).join(", ")||"—"}</code><br/>
-        reduced: <code>${(elim.kinds_reduced||[]).join(", ")||"—"}</code><br/>
-        rate: <code>${elim.kind_elimination_rate ?? "—"}</code>
-      </div>`;
-    } else {
-      elimEl.className = "empty";
-      elimEl.textContent = "— (no follow-up elimination meta)";
-    }
-  }
-  document.getElementById("failures").innerHTML = kinds.length
-    ? kinds.map(([k,v]) => `
-      <div class="failrow">
-        <code>${k}</code>
-        <div class="bar"><i style="width:${(100*v/maxF).toFixed(0)}%"></i></div>
-        <span>${v}</span>
-      </div>`).join("")
-    : '<div class="empty">无失败记录</div>';
+  renderSummary(data);
+  renderFunnel(data.funnel);
+  renderFailures(data.failures);
+  renderElimination(data.elimination);
+  renderUsage(data.usage);
 
-  const rows = data.candidates.map(c => `
-    <tr data-cid="${c.id}" style="cursor:pointer">
-      <td><code>${c.id}</code></td>
-      <td><strong>${escapeHtml(c.title)}</strong><br/><span style="color:var(--muted);font-size:0.8rem">${escapeHtml(c.family)}</span></td>
-      <td>${c.last_tier || "—"} ${pill(c.last_verdict)}</td>
-      <td>${c.score ?? "—"}</td>
-      <td>${c.failures}</td>
-    </tr>`).join("");
-  document.getElementById("cands").innerHTML = rows
-    ? `<table><thead><tr><th>id</th><th>title</th><th>tier</th><th>score</th><th>fails</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<div class="empty">无候选</div>';
-
-  document.querySelectorAll("#cands tr[data-cid]").forEach(tr => {
-    tr.addEventListener("click", () => showCandidate(tr.dataset.cid));
-  });
+  currentCandidates = data.candidates || [];
+  renderCandidates();
+  document.getElementById("detail").style.display = "none";
 }
 
 async function showCandidate(id) {
   const c = await j(`/api/candidates/${id}`);
   const box = document.getElementById("detail");
   box.style.display = "block";
+  const history = (c.tier_history || []).map(t => {
+    const name = TIER_LABELS[t.tier]?.name || t.tier;
+    const cls = t.verdict === "pass" ? "pass" : (t.verdict === "fail" ? "fail" : "");
+    return `<span class="tl ${cls}" title="${escapeHtml(t.summary || "")}">
+      ${escapeHtml(name)} · ${escapeHtml(t.verdict || "—")}
+      ${t.score != null ? ` · ${escapeHtml(String(t.score))}` : ""}
+    </span>`;
+  }).join("") || `<span class="empty">尚无分层历史</span>`;
+
+  const fails = (c.failures || []).map(f =>
+    `<li><strong>${escapeHtml(failLabel(f.kind))}</strong>（${escapeHtml(f.tier)}）：${escapeHtml(f.message)}</li>`
+  ).join("");
+
+  const mechNative = c.mechanism_full || c.mechanism || "";
+  const mechCachedZh = c.mechanism_zh_full || c.mechanism_zh || "";
+  const titleShow = c.title_zh || c.title;
+  const nativeIsZh = /[\u4e00-\u9fff]/.test(mechNative);
+  const displayMech = nativeIsZh ? mechNative : (mechCachedZh || mechNative);
   document.getElementById("detail-body").innerHTML = `
-    <p><strong>${escapeHtml(c.title)}</strong> · ${pill(c.last_verdict)} · family <code>${escapeHtml(c.family)}</code></p>
-    <pre>${escapeHtml(c.mechanism_full || c.mechanism || "")}</pre>
-    <p style="color:var(--muted);font-size:0.85rem">条款引用: ${(c.clause_refs||[]).join(", ") || "—"}</p>
+    <p style="margin:0 0 0.35rem">
+      <strong style="font-size:1.05rem">${escapeHtml(titleShow)}</strong>
+      ${verdictBadge(c.last_verdict)}
+      <span class="badge">${escapeHtml(c.family || "unclassified")}</span>
+    </p>
+    <div class="hint">分层裁决时间线（从早到晚）</div>
+    <div class="timeline">${history}</div>
+    ${fails ? `<div class="hint">失败明细</div><ul style="margin:0.2rem 0 0.6rem;padding-left:1.2rem;font-size:0.88rem;line-height:1.5">${fails}</ul>` : ""}
+    <div class="panel-hd" style="margin-top:0.4rem">
+      <div class="hint" style="margin:0">方案 / 机制说明</div>
+      ${nativeIsZh ? "" : `<button class="btn" id="btn-zh" type="button">旧英文稿：译为中文</button>`}
+    </div>
+    <pre class="mech" id="mech-body">${escapeHtml(displayMech || "（空）")}</pre>
+    ${nativeIsZh ? "" : `<p class="hint">新一轮 <code>run</code> 会原生输出中文方案；此按钮仅用于补译旧候选。</p>`}
+    <p class="hint" style="margin-top:0.6rem">关联条款：${escapeHtml((c.clause_refs || []).join(", ") || "—")}</p>
   `;
+  const btnZh = document.getElementById("btn-zh");
+  if (btnZh) {
+    btnZh.onclick = async () => {
+      const pre = document.getElementById("mech-body");
+      btnZh.disabled = true;
+      btnZh.textContent = "翻译中…";
+      try {
+        const zh = await j(`/api/candidates/${encodeURIComponent(id)}/zh`);
+        pre.textContent = zh.mechanism_zh || "（空）";
+        const titleEl = document.querySelector("#detail-body strong");
+        if (titleEl && zh.title_zh) titleEl.textContent = zh.title_zh;
+        btnZh.textContent = "重新翻译";
+        const card = currentCandidates.find(x => x.id === id);
+        if (card) {
+          card.mechanism_zh = (zh.mechanism_zh || "").slice(0, 400);
+          card.title_zh = zh.title_zh;
+          renderCandidates();
+        }
+      } catch (err) {
+        pre.textContent = "翻译失败：" + (err.message || err);
+        btnZh.textContent = "重试翻译";
+      } finally {
+        btnZh.disabled = false;
+      }
+    };
+  }
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, ch => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
-  })[ch]);
-}
+document.getElementById("compare-btn").onclick = runCompare;
+document.getElementById("close-compare").onclick = () => {
+  document.getElementById("compare-panel").style.display = "none";
+};
+document.getElementById("close-detail").onclick = () => {
+  document.getElementById("detail").style.display = "none";
+};
+document.getElementById("refresh-btn").onclick = () => loadCampaigns();
+document.getElementById("cand-tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".tab");
+  if (!btn) return;
+  currentFilter = btn.dataset.filter;
+  document.querySelectorAll("#cand-tabs .tab").forEach(t => t.classList.toggle("active", t === btn));
+  renderCandidates();
+});
 
 (async () => {
   try {
     const meta = await j("/api/meta");
     document.getElementById("meta").textContent =
-      `${meta.product} · sim=${meta.sim_backend} · telemetry=${meta.telemetry}`;
+      `${meta.product} · 仿真后端 ${meta.sim_backend} · 遥测 ${meta.telemetry === "deferred" ? "暂缓" : meta.telemetry}`;
     await loadCampaigns();
   } catch (e) {
     document.getElementById("campaigns").innerHTML =

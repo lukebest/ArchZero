@@ -14,10 +14,11 @@ from archzero.llm.client import CursorLLM
 from archzero.models import Candidate, TaskClass
 from archzero.store.db import Store
 
-MUTATE_PERSONA = """You mutate architecture mechanism implementations for diversity search.
-Given a parent mechanism and artifacts/errors, produce a VARIANT JSON:
+MUTATE_PERSONA = """你在做体系结构机制的多样性变异搜索。
+根据父代机制与错误/产物，产出一个变体 JSON：
 {title, family, mechanism, knobs: {miss_reduction, extra_bw, area}}
-Keep it plausible. Explore different families when asked."""
+title 与 mechanism 必须原生简体中文；family 用英文短标识；knobs 数值保持英文键名。
+保持可行，必要时探索不同 family。"""
 
 
 def _parse_json(text: str) -> dict:

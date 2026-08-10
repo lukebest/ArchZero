@@ -105,8 +105,10 @@ class ModelCatalog:
         if model_id in (
             "auto",
             "auto-smart",
+            "default",
             "composer-2",
             "composer-2.5",
+            "grok-4.5",
             "cursor-grok-4.5",
             "cursor-grok-4.5-high-fast",
         ):

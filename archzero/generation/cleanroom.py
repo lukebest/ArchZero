@@ -20,22 +20,24 @@ from archzero.generation.pdfutil import extract_text, first_n_pages
 from archzero.llm.client import CursorLLM
 from archzero.models import Candidate, ProblemPackage, TaskClass
 
-EXTRACT_PERSONA = """You extract architecture research problem kernels.
-Output ONLY a JSON object with keys: context, symptom, constraint, non_goals.
-Do not propose solutions. Do not mention named mechanisms from the paper."""
+EXTRACT_PERSONA = """你提取体系结构研究问题内核。
+只返回 JSON，键为：context, symptom, constraint, non_goals。
+各字段内容用简体中文。不要提出解决方案，不要点名论文中的具体机制。"""
 
-DESENSE_PERSONA = """You redact solution spoilers from a problem kernel.
-Remove mechanism names, unique structures, and inventiveness hints.
-Keep measurable symptoms and hard constraints. Return JSON with same keys."""
+DESENSE_PERSONA = """你对问题内核做脱敏，去掉解法剧透。
+删除机制名称、独特结构与发明性暗示；保留可测症状与硬约束。
+返回相同键的 JSON；字段内容用简体中文。"""
+IDEATE_PERSONA = """你是计算机体系结构机制发明者。
+根据脱敏后的问题内核，提出一个具体机制方案。
+只返回 JSON：{title, family, mechanism, expected_effect, risks, clause_refs}。
+title、mechanism、expected_effect、risks 必须原生用简体中文撰写（不要英文稿）。
+family 用简短英文标识（如 prefetch、noc_rg、cache）。
+mechanism 需足够具体，以便后续建立解析模型。"""
 
-IDEATE_PERSONA = """You invent novel computer-architecture mechanisms.
-Given a desensitized problem kernel, propose ONE concrete mechanism.
-Return JSON: {title, family, mechanism, expected_effect, risks, clause_refs}.
-mechanism must be detailed enough to later build an analytic model."""
-
-SCORE_PERSONA = """You are an ideation judge for clean-room evaluation.
-Compare a candidate mechanism to the full paper.
-Return JSON: {label: reproduce|equivalent|alternative|defective, score: 0-1, rationale, novelty_notes}."""
+SCORE_PERSONA = """你是 clean-room 出题评审。
+将候选机制与全文论文对照。
+只返回 JSON：{label: reproduce|equivalent|alternative|defective, score: 0-1, rationale, novelty_notes}。
+rationale 与 novelty_notes 必须原生简体中文；label 保持英文枚举值。"""
 
 
 def _parse_json(text: str) -> dict:

@@ -58,8 +58,9 @@ async def evaluate_tier1(
         f"PROBLEM:\n{problem.title}\n{constraints}\n\n"
         f"PROPOSAL TITLE: {candidate.title}\nFAMILY: {candidate.family}\n\n"
         f"{candidate.mechanism}\n\n"
-        "Write a critical expert review. End with a JSON block:\n"
-        '{"lean":"pass|fail","score":0-1,"key_risks":[],"fixes":[]}'
+        "用简体中文撰写批判性专家评审。末尾附 JSON 块：\n"
+        '{"lean":"pass|fail","score":0-1,"key_risks":[],"fixes":[]}\n'
+        "JSON 中 key_risks/fixes 的字符串也用简体中文。"
     )
 
     async def review(name: str) -> str:
@@ -74,10 +75,11 @@ async def evaluate_tier1(
     reviews = await asyncio.gather(*[review(n) for n in names])
     synth_persona = load_synthesizer(cfg)
     synth_ctx = (
-        "Synthesize the expert reviews into a final gate decision for the funnel.\n"
-        "Return JSON ONLY: "
+        "综合各位专家评审，给出漏斗门控最终裁决。\n"
+        "只返回 JSON："
         '{"verdict":"pass|fail","score":0-1,"summary":"...","clause_refs":[],'
-        '"failure_modes":[]}\n\n'
+        '"failure_modes":[]}\n'
+        "summary 与 failure_modes 必须原生简体中文；verdict 保持英文枚举。\n\n"
         + "\n\n".join(reviews)
     )
     try:

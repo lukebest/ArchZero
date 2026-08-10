@@ -283,6 +283,7 @@ async def run_campaign(
             for i in range(n_generate):
                 prompt = (
                     f"Independent generation #{i + 1}. Explore DOF in the problem.\n"
+                    f"Write title/mechanism/expected_effect/risks in Simplified Chinese.\n"
                     f"TITLE: {problem.title}\n"
                     + "\n".join(f"{c.id}: {c.text}" for c in problem.clauses)
                 )
@@ -297,12 +298,15 @@ async def run_campaign(
                     )
                 except Exception as exc:  # noqa: BLE001
                     data = {
-                        "title": f"Heuristic candidate {i + 1}",
+                        "title": f"启发式候选 {i + 1}",
                         "family": "prefetch",
-                        "mechanism": f"Fallback mechanism due to error: {exc}. "
-                        "Use a dead-block predictor + filtered prefetch.",
+                        "mechanism": (
+                            f"生成失败，使用回退机制说明：{exc}。"
+                            "建议采用死块预测器（dead-block predictor）"
+                            "并配合过滤式预取（filtered prefetch）。"
+                        ),
                     }
-                title = str(data.get("title") or f"Candidate {i + 1}")
+                title = str(data.get("title") or f"候选 {i + 1}")
                 mechanism = str(data.get("mechanism") or "")
                 candidates.append(
                     Candidate(

@@ -46,18 +46,71 @@ def _funnel_stats(store: Store, campaign_id: str) -> list[dict[str, Any]]:
 
 def _serialize_candidate(c) -> dict[str, Any]:
     lt = c.last_tier()
+    metrics = c.metrics or {}
+    mechanism_zh = metrics.get("mechanism_zh")
+    title_zh = metrics.get("title_zh")
     return {
         "id": c.id,
         "title": c.title,
+        "title_zh": title_zh,
         "family": c.family,
         "status": c.status,
         "mechanism": c.mechanism[:400],
+        "mechanism_zh": (str(mechanism_zh)[:400] if mechanism_zh else None),
         "last_tier": lt.tier.value if lt else None,
         "last_verdict": lt.verdict.value if lt else None,
         "score": lt.score if lt else None,
         "failures": len(c.failures),
         "clause_refs": c.clause_refs,
     }
+
+
+def _looks_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in (text or ""))
+
+
+async def _translate_mechanism_zh(cfg: FactoryConfig, candidate) -> dict[str, str]:
+    """Translate title/mechanism to Simplified Chinese; cache on candidate.metrics."""
+    metrics = dict(candidate.metrics or {})
+    if metrics.get("mechanism_zh") and _looks_cjk(str(metrics["mechanism_zh"])):
+        return {
+            "title_zh": str(metrics.get("title_zh") or candidate.title),
+            "mechanism_zh": str(metrics["mechanism_zh"]),
+            "cached": True,
+        }
+
+    from archzero.llm.client import CursorLLM
+    from archzero.models import TaskClass
+
+    prompt = (
+        "将下面的体系结构机制候选译为简体中文。"
+        "保持技术含义准确，专有名词可保留英文括号。"
+        "只返回 JSON：{title_zh, mechanism_zh}。\n\n"
+        f"TITLE:\n{candidate.title}\n\n"
+        f"MECHANISM:\n{candidate.mechanism}"
+    )
+    async with CursorLLM(cfg) as llm:
+        raw = await llm.complete(
+            "你是计算机体系结构技术翻译。输出简体中文 JSON，不要 markdown。",
+            prompt,
+            TaskClass.ANALYTIC,
+            expect_json=True,
+        )
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        data = json.loads(text[start : end + 1]) if start >= 0 and end > start else {}
+    title_zh = str(data.get("title_zh") or candidate.title)
+    mechanism_zh = str(data.get("mechanism_zh") or candidate.mechanism)
+    metrics["title_zh"] = title_zh
+    metrics["mechanism_zh"] = mechanism_zh
+    candidate.metrics = metrics
+    return {"title_zh": title_zh, "mechanism_zh": mechanism_zh, "cached": False}
 
 
 def make_handler(cfg: FactoryConfig):
@@ -121,6 +174,16 @@ def make_handler(cfg: FactoryConfig):
                     self._json(404, {"error": "not found"})
                     return
                 cands = store.list_candidates(campaign_id=cid)
+                through = camp.through_tier
+                survivors = sum(1 for c in cands if c.hard_passed(through))
+                active = sum(1 for c in cands if c.status in {"new", "active"})
+                failed_n = sum(1 for c in cands if c.status == "failed" or (
+                    c.last_tier() and c.last_tier().verdict == Verdict.FAIL
+                ))
+                fail_kinds: dict[str, int] = {}
+                for f in store.list_failures(campaign_id=cid):
+                    fail_kinds[f.kind.value] = fail_kinds.get(f.kind.value, 0) + 1
+                top_fail = max(fail_kinds.items(), key=lambda kv: kv[1])[0] if fail_kinds else None
                 self._json(
                     200,
                     {
@@ -130,6 +193,16 @@ def make_handler(cfg: FactoryConfig):
                             "status": camp.status,
                             "through": camp.through_tier.value,
                             "problem_id": camp.problem_id,
+                            "created_at": camp.created_at.isoformat(),
+                        },
+                        "summary": {
+                            "n_candidates": len(cands),
+                            "survivors": survivors,
+                            "active": active,
+                            "failed": failed_n,
+                            "through": through.value,
+                            "top_failure_kind": top_fail,
+                            "failure_kinds": fail_kinds,
                         },
                         "funnel": _funnel_stats(store, cid),
                         "elimination": (camp.meta or {}).get("elimination"),
@@ -149,16 +222,43 @@ def make_handler(cfg: FactoryConfig):
                 )
                 return
             if path.startswith("/api/candidates/"):
-                cid = path.split("/")[3]
+                parts = [p for p in path.split("/") if p]
+                # /api/candidates/<id> or /api/candidates/<id>/zh
+                if len(parts) < 3:
+                    self._json(404, {"error": "not found"})
+                    return
+                cid = parts[2]
                 c = store.get_candidate(cid)
                 if not c:
                     self._json(404, {"error": "not found"})
                     return
+                if len(parts) >= 4 and parts[3] == "zh":
+                    import asyncio
+
+                    try:
+                        zh = asyncio.run(_translate_mechanism_zh(cfg, c))
+                    except Exception as exc:  # noqa: BLE001
+                        self._json(500, {"error": f"translate failed: {exc}"})
+                        return
+                    store.save_candidate(c)
+                    self._json(
+                        200,
+                        {
+                            "id": c.id,
+                            "title_zh": zh["title_zh"],
+                            "mechanism_zh": zh["mechanism_zh"],
+                            "cached": bool(zh.get("cached")),
+                        },
+                    )
+                    return
+                metrics = c.metrics or {}
                 self._json(
                     200,
                     {
                         **_serialize_candidate(c),
                         "mechanism_full": c.mechanism,
+                        "mechanism_zh_full": metrics.get("mechanism_zh"),
+                        "title_zh": metrics.get("title_zh"),
                         "metrics": c.metrics,
                         "tier_history": [
                             {
