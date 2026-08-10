@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,22 @@ from archzero.models import TaskClass, UsagePool
 class ModelInfo:
     id: str
     raw: dict[str, Any] | None = None
+
+
+def _serialize_raw(item: Any) -> dict[str, Any] | None:
+    """Convert SDK model objects into JSON-safe dicts.
+
+    cursor-sdk returns dataclasses (SDKModel / ModelVariant); dumping
+    ``__dict__`` leaves nested variants that ``json.dumps`` cannot encode.
+    """
+    if item is None:
+        return None
+    if isinstance(item, dict):
+        return item
+    if dataclasses.is_dataclass(item) and not isinstance(item, type):
+        return dataclasses.asdict(item)
+    raw = getattr(item, "__dict__", None)
+    return raw if isinstance(raw, dict) else None
 
 
 class ModelCatalog:
@@ -77,8 +94,7 @@ class ModelCatalog:
             )
             if not mid:
                 continue
-            raw = item if isinstance(item, dict) else getattr(item, "__dict__", {})
-            out.append(ModelInfo(id=str(mid), raw=raw if isinstance(raw, dict) else None))
+            out.append(ModelInfo(id=str(mid), raw=_serialize_raw(item)))
         if not out:
             out = [ModelInfo(id=m) for m in self.cfg.pools.cursor_models]
         return out
@@ -106,44 +122,15 @@ class ModelCatalog:
     def classify_all(self, models: list[ModelInfo]) -> dict[str, UsagePool]:
         return {m.id: self.classify(m.id) for m in models}
 
-    def _first_available(self, preferred: str, candidates: list[str], ids: set[str]) -> str:
-        if not ids or preferred in ids:
-            return preferred
-        # Variant → base: cursor-grok-4.5-high-fast → cursor-grok-4.5 → cursor-grok → …
-        parts = preferred.split("-")
-        for i in range(len(parts) - 1, 1, -1):
-            stem = "-".join(parts[:i])
-            if stem in ids:
-                return stem
-        for mid in candidates:
-            if mid in ids:
-                return mid
-        if "auto-smart" in ids:
-            return "auto-smart"
-        if "auto" in ids:
-            return "auto"
-        return preferred
-
     def pick_for_pool(
         self, pool: UsagePool, available: list[ModelInfo] | None = None
     ) -> str:
-        ids = {m.id for m in (available or self._models or [])}
+        # Honor configured defaults even when models.list() omits agent aliases
+        # (e.g. API exposes grok-4.5 variants while tasks use cursor-grok-4.5-high-fast).
+        _ = available
         if pool == UsagePool.CURSOR:
-            return self._first_available(
-                self.cfg.pools.preferred_cursor,
-                list(self.cfg.pools.cursor_models),
-                ids,
-            )
-        # OTHER
-        preferred = self.cfg.pools.preferred_other
-        if not ids or preferred in ids:
-            return preferred
-        for m in available or []:
-            if self.classify(m.id) == UsagePool.OTHER:
-                return m.id
-        if "auto-smart" in ids:
-            return "auto-smart"
-        return preferred
+            return self.cfg.pools.preferred_cursor
+        return self.cfg.pools.preferred_other
 
     def resolved_routes(self) -> dict[str, tuple[UsagePool, str]]:
         models = self._models or [

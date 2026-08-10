@@ -2,7 +2,7 @@
 
 [pools]
 preferred_cursor = "cursor-grok-4.5-high-fast"
-preferred_other = "claude-4.6-sonnet"
+preferred_other = "cursor-grok-4.5-high-fast"
 cursor_models = ["cursor-grok-4.5-high-fast", "cursor-grok-4.5", "composer-2.5"]
 
 [budget]

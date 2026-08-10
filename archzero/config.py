@@ -27,7 +27,7 @@ class PoolConfig(BaseModel):
         default_factory=lambda: ["claude-", "gpt-", "gemini-", "o1-", "o3-", "o4-"]
     )
     preferred_cursor: str = "cursor-grok-4.5-high-fast"
-    preferred_other: str = "claude-4.6-sonnet"
+    preferred_other: str = "cursor-grok-4.5-high-fast"
     fallback_router: str = "auto-smart"
     fallback_auto: str = "auto"
     optimize_for: str = "balanced"
@@ -272,7 +272,7 @@ def write_default_config(path: Path | None = None) -> Path:
 
 [pools]
 preferred_cursor = "cursor-grok-4.5-high-fast"
-preferred_other = "claude-4.6-sonnet"
+preferred_other = "cursor-grok-4.5-high-fast"
 
 [budget]
 other_pool_max_tokens = 2000000
