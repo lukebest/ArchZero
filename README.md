@@ -121,10 +121,10 @@ uv run archzero models
 # uv run archzero models --refresh   # 绕过目录缓存
 ```
 
-- **默认模型**：全部 Task 默认走池 1 的 `cursor-grok-4.5-high-fast`（可在 `archzero.toml` `[pools].preferred_cursor` 改）
-- **池 1 Cursor Models**（含量充裕）：`cursor-grok-4.5-high-fast`、`cursor-grok-4.5`、`composer-2.5`
+- **默认模型**：全部 Task 默认走池 1 的 `cursor-grok-4.6-high-fast`（可在 `archzero.toml` `[pools].preferred_cursor` 改）
+- **池 1 Cursor Models**（含量充裕）：`cursor-grok-4.6-high-fast`、`cursor-grok-4.6`、`cursor-grok-4.5-high-fast`、`composer-2.5`
 - **池 2 Other Models**（按 API 计价）：Claude / GPT / Gemini… — 仅在 `routing.routes` 显式指向 `other` 时使用
-- **SDK 别名**：配置里可用 `cursor-grok-4.5-high-fast`；调用 `create_agent` 时会映射为 `grok-4.5` + `effort=high` + `fast=true`（`Cursor.models.list()` 只列出基座 id）
+- **SDK 别名**：配置里可用 `cursor-grok-4.6-high-fast`；调用 `create_agent` 时会映射为 `grok-4.6` + `effort=high` + `fast=true`（`Cursor.models.list()` 只列出基座 id）
 
 ### 3. 注册问题包并跑漏斗
 

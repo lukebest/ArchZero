@@ -11,6 +11,8 @@ from typing import Any
 
 # Logical alias → (sdk_model_id, params)
 _ALIASES: dict[str, tuple[str, dict[str, str]]] = {
+    "cursor-grok-4.6-high-fast": ("grok-4.6", {"effort": "high", "fast": "true"}),
+    "cursor-grok-4.6": ("grok-4.6", {}),
     "cursor-grok-4.5-high-fast": ("grok-4.5", {"effort": "high", "fast": "true"}),
     "cursor-grok-4.5": ("grok-4.5", {}),
     "auto": ("default", {}),

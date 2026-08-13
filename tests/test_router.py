@@ -12,7 +12,7 @@ def test_all_tasks_default_to_grok_high_fast(tmp_path):
     store = Store(cfg.db_path)
     catalog = ModelCatalog(cfg)
     catalog._models = [
-        ModelInfo(id="cursor-grok-4.5-high-fast"),
+        ModelInfo(id="cursor-grok-4.6-high-fast"),
         ModelInfo(id="composer-2.5"),
         ModelInfo(id="claude-4.6-sonnet"),
     ]
@@ -21,7 +21,7 @@ def test_all_tasks_default_to_grok_high_fast(tmp_path):
     for task in TaskClass:
         routed = router.pick(task)
         assert routed.pool == UsagePool.CURSOR
-        assert routed.model_id == "cursor-grok-4.5-high-fast"
+        assert routed.model_id == "cursor-grok-4.6-high-fast"
 
 
 def test_preferred_cursor_used_even_if_missing_from_catalog(tmp_path):
@@ -31,13 +31,13 @@ def test_preferred_cursor_used_even_if_missing_from_catalog(tmp_path):
     catalog = ModelCatalog(cfg)
     # Remote catalog may only expose grok-4.5 / composer; still honor preferred.
     catalog._models = [
-        ModelInfo(id="grok-4.5"),
+        ModelInfo(id="grok-4.6"),
         ModelInfo(id="composer-2.5"),
     ]
     budget = BudgetGuard(cfg.budget, store)
     router = ModelRouter(cfg, catalog, budget)
     routed = router.pick(TaskClass.BULK_SCREEN)
-    assert routed.model_id == "cursor-grok-4.5-high-fast"
+    assert routed.model_id == "cursor-grok-4.6-high-fast"
 
 
 def test_budget_downgrade(tmp_path):
@@ -50,7 +50,7 @@ def test_budget_downgrade(tmp_path):
     store = Store(cfg.db_path)
     catalog = ModelCatalog(cfg)
     catalog._models = [
-        ModelInfo(id="cursor-grok-4.5-high-fast"),
+        ModelInfo(id="cursor-grok-4.6-high-fast"),
         ModelInfo(id="claude-4.6-sonnet"),
     ]
     budget = BudgetGuard(cfg.budget, store)
@@ -58,4 +58,4 @@ def test_budget_downgrade(tmp_path):
     routed = router.pick(TaskClass.SYNTHESIZE)
     assert routed.pool == UsagePool.CURSOR
     assert routed.downgraded is True
-    assert routed.model_id == "cursor-grok-4.5-high-fast"
+    assert routed.model_id == "cursor-grok-4.6-high-fast"

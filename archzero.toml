@@ -1,9 +1,9 @@
 # ArchZero Idea Factory configuration
 
 [pools]
-preferred_cursor = "cursor-grok-4.5-high-fast"
-preferred_other = "cursor-grok-4.5-high-fast"
-cursor_models = ["cursor-grok-4.5-high-fast", "cursor-grok-4.5", "composer-2.5"]
+preferred_cursor = "cursor-grok-4.6-high-fast"
+preferred_other = "cursor-grok-4.6-high-fast"
+cursor_models = ["cursor-grok-4.6-high-fast", "cursor-grok-4.6", "cursor-grok-4.5-high-fast", "composer-2.5"]
 
 [budget]
 other_pool_max_tokens = 2000000

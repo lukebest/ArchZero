@@ -18,16 +18,17 @@ DEFAULT_CONFIG_PATH = ROOT / "archzero.toml"
 class PoolConfig(BaseModel):
     cursor_models: list[str] = Field(
         default_factory=lambda: [
+            "cursor-grok-4.6-high-fast",
+            "cursor-grok-4.6",
             "cursor-grok-4.5-high-fast",
-            "cursor-grok-4.5",
             "composer-2.5",
         ]
     )
     other_prefixes: list[str] = Field(
         default_factory=lambda: ["claude-", "gpt-", "gemini-", "o1-", "o3-", "o4-"]
     )
-    preferred_cursor: str = "cursor-grok-4.5-high-fast"
-    preferred_other: str = "cursor-grok-4.5-high-fast"
+    preferred_cursor: str = "cursor-grok-4.6-high-fast"
+    preferred_other: str = "cursor-grok-4.6-high-fast"
     fallback_router: str = "auto-smart"
     fallback_auto: str = "auto"
     optimize_for: str = "balanced"
@@ -83,7 +84,7 @@ class FunnelConfig(BaseModel):
 class TaskRouting(BaseModel):
     """Map TaskClass → preferred UsagePool.
 
-    Default: every task uses the Cursor pool (cursor-grok-4.5-high-fast).
+    Default: every task uses the Cursor pool (cursor-grok-4.6-high-fast).
     """
 
     routes: dict[str, str] = Field(
@@ -271,8 +272,8 @@ def write_default_config(path: Path | None = None) -> Path:
 # default_through = "tier2"
 
 [pools]
-preferred_cursor = "cursor-grok-4.5-high-fast"
-preferred_other = "cursor-grok-4.5-high-fast"
+preferred_cursor = "cursor-grok-4.6-high-fast"
+preferred_other = "cursor-grok-4.6-high-fast"
 
 [budget]
 other_pool_max_tokens = 2000000

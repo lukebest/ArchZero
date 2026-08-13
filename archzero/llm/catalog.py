@@ -109,8 +109,11 @@ class ModelCatalog:
             "composer-2",
             "composer-2.5",
             "grok-4.5",
+            "grok-4.6",
             "cursor-grok-4.5",
             "cursor-grok-4.5-high-fast",
+            "cursor-grok-4.6",
+            "cursor-grok-4.6-high-fast",
         ):
             return UsagePool.CURSOR
         for prefix in self.cfg.pools.other_prefixes:
@@ -128,7 +131,7 @@ class ModelCatalog:
         self, pool: UsagePool, available: list[ModelInfo] | None = None
     ) -> str:
         # Honor configured defaults even when models.list() omits agent aliases
-        # (e.g. API exposes grok-4.5 variants while tasks use cursor-grok-4.5-high-fast).
+        # (e.g. API exposes grok-4.6 while tasks use cursor-grok-4.6-high-fast).
         _ = available
         if pool == UsagePool.CURSOR:
             return self.cfg.pools.preferred_cursor
