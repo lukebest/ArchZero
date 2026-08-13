@@ -37,6 +37,12 @@ export LLVM_CONFIG="/usr/lib/llvm-${LLVM_VERSION}/bin/llvm-config"
 export PATH="/usr/lib/llvm-${LLVM_VERSION}/bin:$PATH"
 export CMAKE_BUILD_PARALLEL_LEVEL="$JOBS"
 
+# Incremental re-runs leave bundled runtime libs under install/lib (via RUNPATH).
+# CMake file(GET_RUNTIME_DEPENDENCIES) then sees both those copies and system
+# libz/libffi/… and fails with "Multiple conflicting paths". Clear the install
+# prefix so each setup does a clean dependency bundle; build dir stays cached.
+rm -rf "$ROOT/.pycircuit_out/toolchain/install"
+
 cd "$VENDOR"
 if [[ -x flows/scripts/pyc ]]; then
   bash flows/scripts/pyc build \
