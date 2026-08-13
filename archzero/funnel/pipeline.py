@@ -131,37 +131,72 @@ async def _run_tiers(
 
         pool = LocalWorkerPool(concurrency=cfg.budget.concurrency)
 
-        async def _handle(job: WorkerJob[Candidate]) -> Candidate:
-            out = await run_one(job.payload)
+        def _persist(out: Candidate) -> Candidate:
             store.save_candidate(out, campaign_id=campaign.id)
             for f in out.failures:
                 store.save_failure(f)
             return out
 
-        jobs = [WorkerJob(id=c.id, payload=c) for c in active]
-        results = await pool.map(jobs, _handle)
-        by_id = {r.job_id: r for r in results}
+        batch_size = cfg.funnel.tier0_batch_size if tier is Tier.T0 else 0
+        done_by_id: dict[str, Candidate] = {}
+        errors: dict[str, str] = {}
+
+        if batch_size > 0:
+            from archzero.funnel.tier0 import evaluate_tier0_batch
+
+            chunks = [
+                active[i : i + batch_size] for i in range(0, len(active), batch_size)
+            ]
+
+            async def _handle_batch(job: WorkerJob[list[Candidate]]) -> list[Candidate]:
+                todo = [c for c in job.payload if not c.passed_through(Tier.T0)]
+                skipped = [c for c in job.payload if c.passed_through(Tier.T0)]
+                screened = await evaluate_tier0_batch(cfg, todo, problem, llm)
+                return skipped + [_persist(c) for c in screened]
+
+            batch_jobs = [
+                WorkerJob(id=f"batch-{i}", payload=chunk)
+                for i, chunk in enumerate(chunks)
+            ]
+            for i, res in enumerate(await pool.map(batch_jobs, _handle_batch)):
+                if res.ok and res.value is not None:
+                    for out in res.value:
+                        done_by_id[out.id] = out
+                else:
+                    for c in chunks[i]:
+                        errors[c.id] = res.error or "batch worker missing"
+        else:
+
+            async def _handle(job: WorkerJob[Candidate]) -> Candidate:
+                return _persist(await run_one(job.payload))
+
+            jobs = [WorkerJob(id=c.id, payload=c) for c in active]
+            for res in await pool.map(jobs, _handle):
+                if res.ok and res.value is not None:
+                    done_by_id[res.job_id] = res.value
+                else:
+                    errors[res.job_id] = res.error or "worker missing"
+
         next_active: list[Candidate] = []
         for c in active:
-            r = by_id.get(c.id)
-            if r is None or not r.ok or r.value is None:
+            out = done_by_id.get(c.id)
+            if out is None:
                 from archzero.funnel.taxonomy import attach_result
                 from archzero.models import TierResult
 
-                failed = attach_result(
+                reason = errors.get(c.id, "worker missing")
+                out = attach_result(
                     c,
                     TierResult(
                         tier=tier,
                         verdict=Verdict.FAIL,
-                        summary=f"worker error: {getattr(r, 'error', 'missing')}",
+                        summary=f"worker error: {reason}",
                         score=0.0,
                     ),
-                    fail_message=getattr(r, "error", None) or "worker missing",
+                    fail_message=reason,
                 )
-                store.save_candidate(failed, campaign_id=campaign.id)
-                next_active.append(failed)
-            else:
-                next_active.append(r.value)
+                store.save_candidate(out, campaign_id=campaign.id)
+            next_active.append(out)
         active = next_active
 
         def _passed_tier(c: Candidate, t: Tier = tier) -> bool:
@@ -199,6 +234,9 @@ async def run_campaign(
     auto_round: int = 0,
     problem: ProblemPackage | None = None,
     candidates_override: list[Candidate] | None = None,
+    use_divergence: bool | None = None,
+    diverge_cells: int | None = None,
+    diverge_per_cell: int | None = None,
 ) -> dict[str, Any]:
     cfg.ensure_dirs()
     store = Store(cfg.db_path)
@@ -267,9 +305,29 @@ async def run_campaign(
     frontier_result = None
     rounds_meta: list[dict[str, Any]] = []
 
+    want_diverge = cfg.divergence.enabled if use_divergence is None else use_divergence
+
     async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
         if candidates_override is not None:
             candidates = candidates_override
+        elif want_diverge:
+            from archzero.generation.divergence import diverge, pool_stats
+
+            candidates = await diverge(
+                cfg,
+                problem,
+                n_cells=diverge_cells or cfg.divergence.n_cells,
+                per_cell=diverge_per_cell or cfg.divergence.per_cell,
+                lens_ids=cfg.divergence.lens_whitelist or None,
+                domain_ids=cfg.divergence.domain_whitelist or None,
+                llm=llm,
+            )
+            campaign.meta["divergence"] = {
+                "n_cells": diverge_cells or cfg.divergence.n_cells,
+                "per_cell": diverge_per_cell or cfg.divergence.per_cell,
+                "generated": len(candidates),
+                "by_axis": pool_stats(candidates),
+            }
         elif seed_dir and seed_dir.is_dir():
             candidates = _load_seeds(seed_dir, problem)
         elif pdf is not None:
@@ -435,6 +493,8 @@ async def run_campaign(
             "active": len(active),
             "usage": store.usage_totals(campaign.id),
         }
+        if campaign.meta.get("divergence"):
+            result["divergence"] = campaign.meta["divergence"]
         if frontier_result is not None:
             result["frontier"] = {
                 "report_path": frontier_result.get("report_path"),

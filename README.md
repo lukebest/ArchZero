@@ -136,6 +136,29 @@ uv run archzero run --spec specs/demo.md --through tier2 --n 8
 uv run archzero report --out report.md
 ```
 
+一条命令走完「问题 → 海量 idea → SOTA 方案」（等价于 `diverge` + `run` + `report`）：
+
+```bash
+uv run archzero flow --spec specs/demo.md --through tier2
+```
+
+跨领域海量发散（`8 理论透镜 × 24 跨域来源 × 3 发散模式` 组合矩阵，每个 cell 一次 LLM 调用）：
+
+```bash
+uv run archzero diverge --spec specs/demo.md --dry-run          # 只看矩阵与调用数，不花钱
+uv run archzero diverge --spec specs/demo.md -o divergence/     # 24 次调用 → 192 个 idea
+uv run archzero run --spec specs/demo.md --diverge --through tier2
+```
+
+默认 `--cells 24 --per-cell 8`，正好喂满 Tier0 的 `tier0_keep=200` 配额。
+`--lens` / `--domain` 可白名单收窄；来源目录见 `archzero/generation/domains.py`。
+每个 idea 的 `metrics` 会记下 `diverge_lens` / `diverge_domain` / `diverge_mode`，
+方便事后统计哪类跨域最能活到最后。
+
+发散后 Tier0 默认逐个候选一次 LLM 调用（192 个 idea = 192 次）。
+在 `archzero.toml` 里设 `funnel.tier0_batch_size = 10` 可批量筛查，把 Tier0 成本降一个量级；
+默认 `0` 保持原有逐个语义。
+
 有论文 PDF 时：
 
 ```bash
@@ -198,6 +221,42 @@ uv run archzero corpus-eval-offline --through tier2 --limit 3  # FakeLLM 离线�
 
 看板只读 Generation + Evaluation 状态（遥测层仍暂缓），便于对照论文漏斗进出量与失败模式。  
 中文快速入门：[`docs/researcher-quickstart.html`](docs/researcher-quickstart.html)（或 `archzero ui` 后打开 `/quickstart.html`）。
+
+### 6.（可选）专利交底书与评审 PPT
+
+**这是旁路模块，不装也不影响上面任何命令。** 核心链路到「SOTA 方案 + report / export / compare」就已经闭环。
+
+```bash
+uv sync --extra patent      # 只为 pptx 渲染；不装则 --md-only 仍可用
+```
+
+对漏斗幸存者生成六段式交底书 + 16:9 评审 PPT：
+
+```bash
+uv run archzero patent --candidate <candidate_id> -o patents/
+uv run archzero patent --campaign <campaign_id> --top 3 -o patents/
+uv run archzero patent --candidate <id> --md-only    # 只出 Markdown，无需 python-pptx
+uv run archzero patent --candidate <id> --no-search  # 跳过联网检索
+uv run archzero flow --spec specs/demo.md --patent   # 一条龙带专利
+```
+
+产出的六段对应华为内部专利评审模板：
+
+| 段落 | 数据来源 |
+| --- | --- |
+| 一、问题背景描述 | 问题包 CTX / REQ / ACC 条款原文 + LLM 归纳 |
+| 二、现有技术描述 | arXiv / Semantic Scholar 检索结果 + LLM 归纳 |
+| 三、本方案的技术方案 | `candidate.mechanism` + Tier2 的 `SPECIFICATION.md` / `model.py` |
+| 四、技术保护点 | LLM 抽 3-8 条，每条标必要技术特征与从属关系 |
+| 五、有益效果 | **直接读 `candidate.metrics` 的实测数字**，对照 ACC 门限并标注证据等级 |
+| 六、检索与对比 | 逐条「相同点 / 不同点 / 区别性技术特征 / 新颖性威胁等级」 |
+
+两条诚实性约定，和漏斗 Tier5/Tier6 宁可报 `UNAVAILABLE` 也不假 PASS 是同一套逻辑：
+
+- **数字只来自漏斗。** 第五段的数值由 `Candidate.metrics` 填充，LLM 只负责措辞；没跑到 Tier2 的候选会在该段直接标注「无实测指标，需补充仿真数据」。
+- **检索状态会跟着走。** 结果带 `retrieval_status = ok | partial | offline`，断网时不编造文献，封面和末页都会打「未经核实」提示。检索结果按 query hash 缓存在 `.archzero/prior_art/`，重跑可离线复现。
+
+专利库（而非论文库）本次不自动检索，改为产出 IPC 分类号 + 中英文检索式建议，PPT 上明确标注需在内部专利库人工执行。
 
 ---
 
@@ -298,6 +357,9 @@ run（生成 + Tier0…through）
 | `spec PATH` | `--lint/--no-lint`，`--register/--no-register` | 校验并（默认）登记问题包 |
 | `read PDF` | `-o insights.md`，`--personas a,b` | 多专家读论文 → 笔记 |
 | `ideate PDF` | `--spec`，`-o dir`，`--n` | Clean-room 出题到目录（不跑漏斗） |
+| `diverge` | `--spec`，`--cells`，`--per-cell`，`--lens`，`--domain`，`--dry-run` | 跨领域组合矩阵海量发散（不跑漏斗） |
+| `flow` | `--spec`，`--through`，`--cells`，`--patent` | 一键 diverge → 漏斗 → report（`--patent` 默认关） |
+| `patent` | `--candidate` / `--campaign --top`，`--md-only`，`--no-search` | 可选：六段式交底书 + 评审 PPT |
 | `frontier` | `--spec`，`--campaign`，`--offline`，`-o` | 只做 §5.1 扩题，不跑漏斗 |
 | `evolve` | `--campaign`（必填），`--generations`，`--reenter/--no-reenter` | 进化搜索 + 可选回流 |
 | `report` | `--campaign`，`-o report.md` | 漏斗吞吐 / 失败分类报告 |
@@ -441,7 +503,7 @@ Open degrees of freedom: <可搜索维度列表>.
 archzero/           # 产品代码
   llm/              # Cursor SDK 客户端、目录、路由、预算、shim
   spec/             # NDF-lite
-  generation/       # 理解 / clean-room / frontier
+  generation/       # 理解 / clean-room / frontier / 跨域发散（theories + domains + divergence）
   personas/         # 评审/读论文人设（自 Gauntlet 精选迁入）
   funnel/           # Tier0–5 + pipeline
   analytic/         # 共享解析核
@@ -450,6 +512,7 @@ archzero/           # 产品代码
   evolve/           # MAP-Elites + OpenEvolve 适配
   feedback/         # 遥测接口（暂缓）
   report/           # 周级漏斗报告
+  patent/           # 可选：文献检索 + 六段式交底书 + 评审 PPT（uv sync --extra patent）
   store/            # SQLite + 内容寻址产物
   web/              # 本地研究员看板（stdlib HTTP + 单页 UI）
   doctor.py         # 运行前环境自检
@@ -484,7 +547,9 @@ docs/analysis-*.md  # 与外部仓库对照分析
 - `[pools]` — 模型偏好与池划分
 - `[budget]` — 池 2 token/调用上限、并发；可选 `cursor_pool_max_tokens`（或 `run --max-tokens`）
 - `[quotas]` — 各 tier 保留名额
-- `[funnel]` — `strict_evidence` / `ensemble_n` / `use_verifiers` / `llm_dedicated_sim`
+- `[funnel]` — `strict_evidence` / `ensemble_n` / `use_verifiers` / `llm_dedicated_sim` / `tier0_batch_size`（`0` = 逐个筛，>0 = 批量降成本）
+- `[divergence]` — 跨领域发散 `enabled` / `n_cells` / `per_cell` / `lens_whitelist` / `domain_whitelist`
+- `[patent]` — 可选模块：`search_enabled` / `max_hits` / 中文字体 `ea_font`
 - `[sim] backend` — `stub`（默认）/ `directed` / `champsim` / `gem5`
 - `[rtl]` — pyCircuit 根目录与 toolchain
 - `[sign] enabled` — Tier6 预留，保持 `false`

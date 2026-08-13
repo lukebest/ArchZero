@@ -79,6 +79,34 @@ class FunnelConfig(BaseModel):
     llm_dedicated_sim: bool = False
     model_exec_timeout_s: int = 30
     model_exec_mem_mb: int = 512
+    # Tier0: screen N candidates per LLM call (0 = one call per candidate).
+    # Only worth enabling for large divergence pools.
+    tier0_batch_size: int = 0
+
+
+class DivergenceConfig(BaseModel):
+    """Cross-domain mass ideation (theory lens x domain source x mode)."""
+
+    enabled: bool = False
+    n_cells: int = 24
+    per_cell: int = 8
+    lens_whitelist: list[str] = Field(default_factory=list)
+    domain_whitelist: list[str] = Field(default_factory=list)
+
+
+class PatentConfig(BaseModel):
+    """Optional patent disclosure / review deck module.
+
+    Requires the ``patent`` extra for pptx rendering; Markdown and prior-art
+    search work without it.
+    """
+
+    search_enabled: bool = True
+    max_hits: int = 15
+    max_queries: int = 6
+    request_timeout_s: float = 20.0
+    ea_font: str = "Microsoft YaHei"
+    latin_font: str = "Calibri"
 
 
 class TaskRouting(BaseModel):
@@ -97,6 +125,8 @@ class TaskRouting(BaseModel):
             TaskClass.SYNTHESIZE.value: UsagePool.CURSOR.value,
             TaskClass.SPEC_GEN.value: UsagePool.CURSOR.value,
             TaskClass.FINAL_JUDGE.value: UsagePool.CURSOR.value,
+            TaskClass.PRIOR_ART.value: UsagePool.CURSOR.value,
+            TaskClass.PATENT_DRAFT.value: UsagePool.CURSOR.value,
         }
     )
 
@@ -155,8 +185,14 @@ class FactoryConfig(BaseModel):
     rtl: RtlConfig = Field(default_factory=RtlConfig)
     sign: SignConfig = Field(default_factory=SignConfig)
     evolve: EvolveConfig = Field(default_factory=EvolveConfig)
+    divergence: DivergenceConfig = Field(default_factory=DivergenceConfig)
+    patent: PatentConfig = Field(default_factory=PatentConfig)
     cleanroom_n: int = 5
     default_through: Tier = Tier.T2
+
+    @property
+    def prior_art_dir(self) -> Path:
+        return self.state_dir / "prior_art"
 
     @property
     def personas_root(self) -> Path:
@@ -241,6 +277,8 @@ def load_config(path: Path | None = None) -> FactoryConfig:
         "rtl",
         "sign",
         "evolve",
+        "divergence",
+        "patent",
     ):
         if section in data and isinstance(data[section], dict):
             flat[section] = data[section]
@@ -296,6 +334,20 @@ strict_evidence = true
 ensemble_n = 1
 use_verifiers = true
 llm_dedicated_sim = false
+# tier0_batch_size = 10  # batch-screen large divergence pools in one call
+
+[divergence]
+# Cross-domain mass ideation before Tier0. n_cells LLM calls -> n_cells*per_cell ideas.
+enabled = false
+n_cells = 24
+per_cell = 8
+# lens_whitelist = ["queueing_theory", "information_theory"]
+# domain_whitelist = ["tcp_congestion", "db_query_optimization"]
+
+[patent]
+# Optional module. pptx rendering needs: uv sync --extra patent
+search_enabled = true
+max_hits = 15
 
 [sim]
 backend = "stub"

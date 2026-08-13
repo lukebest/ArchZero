@@ -34,6 +34,8 @@ class TaskClass(str, Enum):
     SYNTHESIZE = "synthesize"  # Tier1 synthesizer — pool 2
     SPEC_GEN = "spec_gen"  # specification drafting — pool 2
     FINAL_JUDGE = "final_judge"  # Tier4/5 adjudication — pool 2
+    PRIOR_ART = "prior_art"  # optional: literature search + comparison
+    PATENT_DRAFT = "patent_draft"  # optional: disclosure drafting
 
 
 class Tier(str, Enum):

@@ -30,6 +30,69 @@ async def test_tier0_pass(tmp_cfg, demo_problem, fake_llm):
     assert out.tier_history[-1].evidence == EvidenceLevel.ANALYTIC
 
 
+def _batch_candidates(problem, n: int) -> list[Candidate]:
+    return [
+        Candidate(
+            problem_id=problem.id,
+            title=f"t0-batch-{i}",
+            mechanism=f"Mechanism variant {i}.",
+        )
+        for i in range(n)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tier0_batch_screens_all_in_one_call(tmp_cfg, demo_problem):
+    from archzero.funnel.tier0 import evaluate_tier0_batch
+
+    llm = FakeLLM(
+        responses={
+            "bulk_screen": json.dumps(
+                {
+                    "results": [
+                        {"index": 1, "verdict": "pass", "score": 0.9, "summary": "ok"},
+                        {"index": 2, "verdict": "fail", "score": 0.1, "summary": "违反带宽上限"},
+                        {"index": 3, "verdict": "pass", "score": 0.7, "summary": "ok"},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        }
+    )
+    out = await evaluate_tier0_batch(
+        tmp_cfg, _batch_candidates(demo_problem, 3), demo_problem, llm
+    )
+
+    assert len([c for c in llm.calls if c["op"] == "complete"]) == 1
+    verdicts = [c.tier_history[-1].verdict for c in out]
+    assert verdicts == [Verdict.PASS, Verdict.FAIL, Verdict.PASS]
+    assert out[0].tier_history[-1].evidence == EvidenceLevel.ANALYTIC
+
+
+@pytest.mark.asyncio
+async def test_tier0_batch_fails_closed_on_missing_rows(tmp_cfg, demo_problem):
+    """An unscreened candidate must not slip through as a pass."""
+    from archzero.funnel.tier0 import evaluate_tier0_batch
+
+    llm = FakeLLM(
+        responses={
+            "bulk_screen": json.dumps(
+                {"results": [{"index": 1, "verdict": "pass", "score": 0.9}]}
+            )
+        }
+    )
+    out = await evaluate_tier0_batch(
+        tmp_cfg, _batch_candidates(demo_problem, 3), demo_problem, llm
+    )
+
+    assert [c.tier_history[-1].verdict for c in out] == [
+        Verdict.PASS,
+        Verdict.FAIL,
+        Verdict.FAIL,
+    ]
+    assert "未返回" in out[2].tier_history[-1].summary
+
+
 @pytest.mark.asyncio
 async def test_tier2_disagreement_fails(tmp_cfg, demo_problem):
     from archzero.funnel.tier2 import evaluate_tier2

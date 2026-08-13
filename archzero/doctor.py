@@ -251,4 +251,51 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
         )
     )
 
+    # Optional patent module — never an error, the core funnel does not use it.
+    try:
+        import pptx  # noqa: F401
+
+        pptx_detail = "installed"
+    except ImportError:
+        pptx_detail = "not installed (optional: uv sync --extra patent)"
+    checks.append(
+        Check(name="python-pptx optional", ok=True, detail=pptx_detail, severity="info")
+    )
+
+    checks.append(
+        Check(
+            name="prior-art network optional",
+            ok=True,
+            detail=_prior_art_reachability(cfg),
+            severity="info",
+        )
+    )
+
     return checks
+
+
+def _prior_art_reachability(cfg: FactoryConfig) -> str:
+    """Probe arXiv / Semantic Scholar. Offline only degrades the patent module."""
+    if not cfg.patent.search_enabled:
+        return "disabled (patent.search_enabled=false)"
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - httpx is a core dependency
+        return "httpx missing"
+
+    reachable: list[str] = []
+    for name, url in (
+        ("arxiv", "http://export.arxiv.org/api/query?search_query=all:cache&max_results=1"),
+        ("s2", "https://api.semanticscholar.org/graph/v1/paper/search?query=cache&limit=1"),
+    ):
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            if resp.status_code < 400:
+                reachable.append(name)
+        except Exception:  # noqa: BLE001
+            continue
+    if len(reachable) == 2:
+        return "arxiv/s2 reachable"
+    if reachable:
+        return f"only {reachable[0]} reachable (patent search will be partial)"
+    return "offline (patent search will degrade to unverified)"

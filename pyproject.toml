@@ -24,6 +24,11 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
 ]
+# Optional patent disclosure / review deck module. Prior-art search and the
+# Markdown disclosure work without this; only pptx rendering needs it.
+patent = [
+  "python-pptx>=1.0",
+]
 
 [project.scripts]
 archzero = "archzero.cli:app"
@@ -43,6 +48,7 @@ markers = [
   "ensemble: Tier2 ensemble_n>1 smoke",
   "paper: paper-profile config checks",
   "champsim: optional ChampSim binary smoke",
+  "patent: optional patent disclosure / pptx module",
 ]
 
 [tool.ruff]

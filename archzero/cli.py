@@ -187,6 +187,17 @@ def run_cmd(
     max_tokens: Optional[int] = typer.Option(
         None, "--max-tokens", help="Optional Cursor pool token ceiling for this process"
     ),
+    diverge: Optional[bool] = typer.Option(
+        None,
+        "--diverge/--no-diverge",
+        help="Generate via the cross-domain matrix instead of repeated ideation",
+    ),
+    diverge_cells: Optional[int] = typer.Option(
+        None, "--diverge-cells", help="Matrix cells = LLM calls (default 24)"
+    ),
+    diverge_per_cell: Optional[int] = typer.Option(
+        None, "--diverge-per-cell", help="Ideas requested per cell (default 8)"
+    ),
 ) -> None:
     """Run the evaluation funnel on generated or seeded candidates."""
     from archzero.funnel.pipeline import run_campaign
@@ -219,6 +230,9 @@ def run_cmd(
             frontier_offline=frontier_offline,
             resume_campaign_id=resume,
             auto_round=auto_round,
+            use_divergence=diverge,
+            diverge_cells=diverge_cells,
+            diverge_per_cell=diverge_per_cell,
         )
     )
     console.print(
@@ -226,6 +240,12 @@ def run_cmd(
         f"passed={result['passed']} failed={result['failed']} "
         f"through={through}"
     )
+    if result.get("divergence"):
+        dv = result["divergence"]
+        console.print(
+            f"[green]divergence[/green] cells={dv.get('n_cells')} "
+            f"ideas={dv.get('generated')}"
+        )
     if result.get("frontier"):
         fr = result["frontier"]
         console.print(
@@ -234,6 +254,88 @@ def run_cmd(
         )
     if result.get("auto_rounds"):
         console.print(f"[green]auto-rounds[/green] {len(result['auto_rounds'])}")
+
+
+@app.command("diverge")
+def diverge_cmd(
+    ctx: typer.Context,
+    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    out: Path = typer.Option(Path("divergence"), "--out", "-o"),
+    cells: Optional[int] = typer.Option(
+        None, "--cells", help="Matrix cells = LLM calls (default 24)"
+    ),
+    per_cell: Optional[int] = typer.Option(
+        None, "--per-cell", help="Ideas requested per cell (default 8)"
+    ),
+    lens: Optional[str] = typer.Option(
+        None, "--lens", help="Comma-separated theory lens whitelist"
+    ),
+    domain: Optional[str] = typer.Option(
+        None, "--domain", help="Comma-separated cross-domain source whitelist"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show matrix coverage without calling the LLM"
+    ),
+) -> None:
+    """Cross-domain mass ideation: theory lens x domain source x expansion mode."""
+    from archzero.generation.divergence import (
+        build_matrix,
+        coverage_summary,
+        diverge,
+        divergence_markdown,
+        dumps_pool,
+    )
+    from archzero.generation.domains import domain_catalog_markdown
+    from archzero.generation.theories import theory_catalog_markdown
+    from archzero.spec.ndf import load_problem_package
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    pp = load_problem_package(spec)
+    n_cells = cells or cfg.divergence.n_cells
+    n_per = per_cell or cfg.divergence.per_cell
+    lens_ids = [s.strip() for s in lens.split(",") if s.strip()] if lens else None
+    domain_ids = [s.strip() for s in domain.split(",") if s.strip()] if domain else None
+
+    matrix = build_matrix(
+        pp, n_cells=n_cells, lens_ids=lens_ids, domain_ids=domain_ids
+    )
+    cov = coverage_summary(matrix)
+
+    table = Table(title=f"Divergence matrix ({len(matrix)} cells)")
+    table.add_column("mode")
+    table.add_column("theory lens")
+    table.add_column("cross-domain source")
+    for cell in matrix:
+        table.add_row(cell.mode, cell.lens.name, cell.domain.name)
+    console.print(table)
+    console.print(
+        f"coverage: {len(cov['lens'])} lenses / {len(cov['domain'])} domains "
+        f"/ {len(cov['mode'])} modes"
+    )
+    if dry_run:
+        console.print(f"[yellow]dry-run[/yellow] would issue {len(matrix)} LLM calls")
+        return
+
+    cands = asyncio.run(
+        diverge(
+            cfg,
+            pp,
+            n_cells=n_cells,
+            per_cell=n_per,
+            lens_ids=lens_ids,
+            domain_ids=domain_ids,
+        )
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "THEORY_LENSES.md").write_text(theory_catalog_markdown(), encoding="utf-8")
+    (out / "DOMAIN_SOURCES.md").write_text(domain_catalog_markdown(), encoding="utf-8")
+    (out / "DIVERGENCE.md").write_text(
+        divergence_markdown(pp, matrix, cands), encoding="utf-8"
+    )
+    (out / "ideas.json").write_text(dumps_pool(cands), encoding="utf-8")
+    console.print(
+        f"[green]diverged[/green] {len(cands)} ideas from {len(matrix)} cells → {out}"
+    )
 
 
 @app.command("frontier")
@@ -314,6 +416,98 @@ def evolve_cmd(
         )
     )
     console.print(f"[green]evolve[/green] {summary}")
+
+
+@app.command("flow")
+def flow_cmd(
+    ctx: typer.Context,
+    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    through: str = typer.Option("tier2", "--through", help="Stop after this tier"),
+    cells: Optional[int] = typer.Option(
+        None, "--cells", help="Divergence matrix cells (default 24)"
+    ),
+    per_cell: Optional[int] = typer.Option(
+        None, "--per-cell", help="Ideas per cell (default 8)"
+    ),
+    out: Path = typer.Option(Path("flow"), "--out", "-o", help="Output directory"),
+    patent: bool = typer.Option(
+        False, "--patent", help="Also draft the optional disclosure + review deck"
+    ),
+    patent_top: int = typer.Option(
+        1, "--patent-top", help="How many survivors to draft patents for"
+    ),
+) -> None:
+    """One shot: diverge → funnel → report (→ optional patent deck)."""
+    from archzero.funnel.pipeline import run_campaign
+    from archzero.logging_util import setup_logging
+    from archzero.report.weekly import write_report
+    from archzero.spec.lint import lint_package
+    from archzero.spec.ndf import load_problem_package
+
+    setup_logging()
+    cfg = _cfg(ctx.obj.get("config_path"))
+    try:
+        through_tier = Tier(through)
+    except ValueError as e:
+        raise typer.BadParameter(f"unknown tier {through}") from e
+
+    pp = load_problem_package(spec)
+    issues = lint_package(pp)
+    for issue in issues:
+        console.print(f"[yellow]lint[/yellow] {issue}")
+    console.print(f"[green]spec[/green] {pp.id} — {len(pp.clauses)} clauses")
+
+    result = asyncio.run(
+        run_campaign(
+            cfg,
+            spec_path=spec,
+            through=through_tier,
+            use_divergence=True,
+            diverge_cells=cells,
+            diverge_per_cell=per_cell,
+        )
+    )
+    campaign_id = result["campaign_id"]
+    dv = result.get("divergence") or {}
+    console.print(
+        f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
+        f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
+    )
+    console.print(
+        f"[green]funnel[/green] {campaign_id} passed={result['passed']} "
+        f"failed={result['failed']} active={result['active']} through={through}"
+    )
+
+    out.mkdir(parents=True, exist_ok=True)
+    report = write_report(cfg, campaign_id=campaign_id, out=out / f"REPORT-{campaign_id}.md")
+    console.print(f"[green]report[/green] {report}")
+
+    if not patent:
+        return
+
+    from archzero.patent import PatentDepsMissing
+    from archzero.patent.disclosure import build_disclosure, disclosure_markdown
+    from archzero.store.db import Store
+
+    store = Store(cfg.db_path)
+    pool = store.list_candidates(campaign_id=campaign_id)
+    survivors = [c for c in pool if c.hard_passed(through_tier)] or pool
+    for cand in survivors[:patent_top]:
+        disc = asyncio.run(build_disclosure(cfg, cand, problem=pp))
+        stem = out / f"patent-{cand.id}"
+        stem.with_suffix(".md").write_text(
+            disclosure_markdown(disc), encoding="utf-8"
+        )
+        stem.with_suffix(".json").write_text(disc.to_json(), encoding="utf-8")
+        console.print(f"[green]disclosure[/green] {stem.with_suffix('.md')}")
+        from archzero.patent.pptx_render import render_deck
+
+        try:
+            console.print(
+                f"[green]deck[/green] {render_deck(cfg, disc, stem.with_suffix('.pptx'))}"
+            )
+        except PatentDepsMissing as exc:
+            console.print(f"[yellow]skipped pptx[/yellow] {exc}")
 
 
 @app.command("reproduce")
@@ -573,6 +767,83 @@ def new_spec_cmd(
             console.print(f"[yellow]lint[/yellow] {i}")
         raise typer.Exit(code=1)
     console.print(f"[green]lint ok[/green] ({len(pp.clauses)} clauses) — {pp.id}")
+
+
+@app.command("patent")
+def patent_cmd(
+    ctx: typer.Context,
+    candidate: Optional[str] = typer.Option(
+        None, "--candidate", help="Candidate id (or use --campaign --top)"
+    ),
+    campaign: Optional[str] = typer.Option(
+        None, "--campaign", help="Draft for the top survivors of a campaign"
+    ),
+    top: int = typer.Option(1, "--top", help="How many campaign survivors to draft"),
+    out: Path = typer.Option(Path("patents"), "--out", "-o", help="Output directory"),
+    search: bool = typer.Option(
+        True, "--search/--no-search", help="Query arXiv / Semantic Scholar for prior art"
+    ),
+    md_only: bool = typer.Option(
+        False, "--md-only", help="Markdown disclosure only (no python-pptx needed)"
+    ),
+) -> None:
+    """Optional: draft a six-section disclosure and Huawei review deck.
+
+    PPTX rendering needs the patent extra: uv sync --extra patent
+    """
+    from archzero.patent import PatentDepsMissing
+    from archzero.patent.disclosure import build_disclosure, disclosure_markdown
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+
+    targets: list = []
+    if candidate:
+        found = store.get_candidate(candidate)
+        if found is None:
+            raise typer.BadParameter(f"unknown candidate {candidate}")
+        targets = [found]
+    elif campaign:
+        pool = store.list_candidates(campaign_id=campaign)
+        survivors = [c for c in pool if c.status not in ("killed", "rejected")]
+        targets = (survivors or pool)[:top]
+        if not targets:
+            raise typer.BadParameter(f"campaign {campaign} has no candidates")
+    else:
+        raise typer.BadParameter("one of --candidate or --campaign is required")
+
+    out.mkdir(parents=True, exist_ok=True)
+    for cand in targets:
+        problem = store.get_problem(cand.problem_id)
+        disc = asyncio.run(
+            build_disclosure(cfg, cand, problem=problem, search=search)
+        )
+        stem = out / f"patent-{cand.id}"
+        md_path = stem.with_suffix(".md")
+        md_path.write_text(disclosure_markdown(disc), encoding="utf-8")
+        stem.with_suffix(".json").write_text(disc.to_json(), encoding="utf-8")
+        console.print(f"[green]disclosure[/green] {md_path}")
+
+        if md_only:
+            continue
+        from archzero.patent.pptx_render import render_deck
+
+        try:
+            deck = render_deck(cfg, disc, stem.with_suffix(".pptx"))
+        except PatentDepsMissing as exc:
+            console.print(f"[yellow]skipped pptx[/yellow] {exc}")
+            continue
+        console.print(f"[green]deck[/green] {deck}")
+
+        if disc.warnings:
+            for w in disc.warnings:
+                console.print(f"[yellow]warn[/yellow] {w}")
+        if not disc.prior_art.verified:
+            console.print(
+                f"[yellow]prior-art[/yellow] {disc.prior_art.retrieval_status} — "
+                "检索结果未经核实，评审前请人工补检索"
+            )
 
 
 @app.command("export")

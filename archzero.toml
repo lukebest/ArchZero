@@ -22,6 +22,18 @@ tier6_keep = 2
 [funnel]
 strict_evidence = true
 ensemble_n = 1
+# tier0_batch_size = 10  # batch-screen large divergence pools in one call
+
+[divergence]
+# Cross-domain mass ideation before Tier0. n_cells LLM calls -> n_cells*per_cell ideas.
+enabled = false
+n_cells = 24
+per_cell = 8
+
+[patent]
+# Optional module. pptx rendering needs: uv sync --extra patent
+search_enabled = true
+max_hits = 15
 
 [sim]
 backend = "champsim"
