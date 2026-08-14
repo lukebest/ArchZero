@@ -71,6 +71,10 @@ class FunnelConfig(BaseModel):
 
     # When True, T3+ refuse PASS if configured real backend is unavailable
     strict_evidence: bool = True
+    # When True, Tier2 refuses to grade a problem package whose acceptance
+    # criteria rest on metrics no tier measures (e.g. a NoC spec asking for p99
+    # completion latency) instead of falling back to cache defaults.
+    strict_acc: bool = True
     # Tier2: require majority of ensemble runs (when ensemble_n > 1)
     ensemble_n: int = 1
     # Run quant_eval spec + functional verifiers before insight
@@ -135,7 +139,7 @@ class TaskRouting(BaseModel):
 
 
 class SimConfig(BaseModel):
-    backend: str = "stub"  # stub | champsim | gem5 | directed
+    backend: str = "stub"  # stub | directed | champsim | gem5 | noc
     champsim_bin: str | None = None
     gem5_bin: str | None = None
     traces_dir: str | None = None
@@ -331,6 +335,8 @@ tier6_keep = 2
 
 [funnel]
 strict_evidence = true
+# Refuse to grade a spec whose ACC rests on unmeasurable metrics (see: archzero acc)
+strict_acc = true
 ensemble_n = 1
 use_verifiers = true
 llm_dedicated_sim = false

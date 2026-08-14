@@ -51,3 +51,48 @@ def test_web_handler_health(tmp_path):
     Handler = make_handler(cfg)
     assert Handler is not None
     assert (Path(__file__).resolve().parents[1] / "archzero" / "web" / "static" / "index.html").is_file()
+
+
+def test_missing_api_key_is_a_warning_not_a_hard_error(tmp_path, monkeypatch):
+    """`doctor` is the first command a new user runs; it must not exit 1."""
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    cfg = FactoryConfig(state_dir=tmp_path / "state", cursor_api_key=None)
+    cfg.ensure_dirs()
+    key_check = next(c for c in run_doctor(cfg) if c.name == "CURSOR_API_KEY")
+    assert not key_check.ok
+    assert key_check.severity == "warn"
+    assert "seed-demo" in key_check.detail
+
+
+def test_doctor_reports_metric_registry_coverage(tmp_cfg):
+    check = next(c for c in run_doctor(tmp_cfg) if c.name == "funnel.strict_acc")
+    assert "archzero acc" in check.detail
+
+
+def test_dashboard_exposes_acc_verdict_for_a_campaign(tmp_path):
+    """The refusal must be visible in the UI, not only in the terminal."""
+    from archzero.funnel.pipeline import acc_gate_for_campaign
+    from archzero.spec.ndf import load_problem_package
+    from archzero.web.app import make_handler as _mh
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    store = Store(cfg.db_path)
+
+    noc = load_problem_package(root / "specs" / "noc_low_tail_collectives.md")
+    _, acc_meta = acc_gate_for_campaign(cfg, noc, Tier.T4)
+    camp = Campaign(name="noc round", problem_id=noc.id, meta={"acc": acc_meta})
+    store.save_campaign(camp)
+
+    reloaded = store.get_campaign(camp.id)
+    assert reloaded is not None
+    acc = reloaded.meta["acc"]
+    assert acc["report_only"] is True
+    assert acc["backend"] == "noc"
+    assert "clamped_from" not in acc
+    assert _mh(cfg) is not None
+
+    index = (root / "archzero" / "web" / "static" / "index.html").read_text("utf-8")
+    assert "renderAcc(data.acc)" in index, "banner must be wired into campaign render"
+    assert "report_only" in index

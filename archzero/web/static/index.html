@@ -523,6 +523,8 @@
         </div>
         <p class="hint" id="camp-sub">还没有选中 Campaign。</p>
 
+        <div id="accBanner" style="display:none"></div>
+
         <div class="summary" id="summary">
           <div class="stat"><div class="label">候选想法</div><div class="value">—</div><div class="sub">本轮生成/导入</div></div>
           <div class="stat"><div class="label">活到终点</div><div class="value">—</div><div class="sub">通过目标层</div></div>
@@ -829,6 +831,39 @@ function renderFailures(failures) {
     </div>`).join("");
 }
 
+function renderAcc(acc) {
+  const el = document.getElementById("accBanner");
+  if (!acc) { el.style.display = "none"; return; }
+  const gaps = acc.unmeasurable_metrics || [];
+  const defaulted = acc.defaulted_gates || [];
+  if (acc.clamped_from) {
+    el.style.display = "";
+    el.style.cssText = "display:block;margin:0.75rem 0;padding:0.8rem 1rem;border:1px solid var(--fail);"
+      + "border-left-width:4px;border-radius:8px;background:#fef3f2;font-size:0.88rem;line-height:1.6";
+    el.innerHTML = `<strong style="color:var(--fail)">漏斗封顶在 Tier1</strong>
+      （原请求 <code>${escapeHtml(acc.clamped_from)}</code>，领域推断 <code>${escapeHtml(acc.domain || "?")}</code>）<br/>
+      本仓库没有评估器能测量该问题包的验收指标：<strong>${escapeHtml(gaps.join("、") || "—")}</strong>。
+      Tier2+ 报 UNAVAILABLE，而不是用缓存门限给出假结论。<br/>
+      <span class="hint">查看细节：<code>archzero acc &lt;spec.md&gt;</code></span>`;
+    return;
+  }
+  if (acc.report_only || gaps.length) {
+    el.style.display = "";
+    el.style.cssText = "display:block;margin:0.75rem 0;padding:0.8rem 1rem;border:1px solid var(--warn);"
+      + "border-left-width:4px;border-radius:8px;background:#fffaeb;font-size:0.88rem;line-height:1.6";
+    const parts = [];
+    if (acc.report_only) {
+      const measured = (acc.measurable_performance || []).join("、") || "—";
+      parts.push(`可测量但不裁决：将报告 <strong>${escapeHtml(measured)}</strong>，规范未给出数值门限。`);
+    }
+    if (gaps.length) parts.push(`仍无评估器的声明指标：<strong>${escapeHtml(gaps.join("、"))}</strong>`);
+    el.innerHTML = `<strong style="color:var(--warn)">${acc.report_only ? "report-only" : "评估盲区"}</strong>（领域推断
+      <code>${escapeHtml(acc.domain || "?")}</code>）<br/>${parts.join("<br/>")}`;
+    return;
+  }
+  el.style.display = "none";
+}
+
 function renderElimination(elim) {
   const elimEl = document.getElementById("eliminationBox");
   if (elim && (elim.kinds_eliminated || elim.kind_elimination_rate != null)) {
@@ -922,6 +957,7 @@ async function loadDetail(id) {
      （${escapeHtml(TIER_LABELS[data.campaign.through]?.name || "")}） ·
      id <code>${escapeHtml(data.campaign.id)}</code>`;
 
+  renderAcc(data.acc);
   renderSummary(data);
   renderFunnel(data.funnel);
   renderFailures(data.failures);

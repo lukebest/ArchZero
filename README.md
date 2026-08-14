@@ -11,11 +11,13 @@
 
 | 层 | 状态 | 说明 |
 |----|------|------|
-| NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint；ACC 数值解析进 T2–T4 |
+| NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint；ACC 数值解析进 T2–T4，**每个门限标注来自条款还是缺省值** |
+| 跨域指标契约 | Implemented | `spec/metrics.py` 注册表（cache/noc/dataflow/wafer）；能测但无门限 → report-only；无评估器 → Tier2 拒判（`archzero acc`） |
+| NoC 解析后端 | Implemented | 8×6 iso-wire mesh/torus α-β + 对分带宽模型；产出 p95/p99/goodput/利用率，不发明 MPKI 门限 |
 | Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
 | Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
 | Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`-c archzero.paper.toml` 可开 ×3 |
-| Tier3 directed / dedicated | Implemented | directed 机制模型；`-c archzero.paper.toml` 开 `llm_dedicated_sim`（自测参与裁决）；ACC（miss/BW/area/Magic Gap） |
+| Tier3 directed / dedicated / noc | Implemented | directed 机制模型；NoC 解析模型（领域自动路由）；`-c archzero.paper.toml` 开 `llm_dedicated_sim` |
 | Tier3/4 ChampSim | Optional | 二进制缺省→`UNAVAILABLE`（`strict_evidence`）；见 `tools/CHAMPSIM.md` |
 | Tier3/4 gem5 | Scaffold | 需本机 gem5 + agent harness |
 | Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
@@ -42,15 +44,33 @@ Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5 ⇢ Tier6(reserved)
 
 ## 快速开始
 
+### 0. 零配置试跑（不需要 API Key）
+
+先看它做什么，再决定要不要配 key。以下三条命令全离线：
+
+```bash
+uv sync --extra dev
+uv run archzero seed-demo      # 三个离线 campaign：缓存 / NoC report-only / 晶圆级拒判
+uv run archzero ui             # http://127.0.0.1:8787/
+```
+
+看板里会有两轮实验。第二轮（NoC 尾时延）会挂一条红色横幅说明**漏斗拒绝评判这个问题包**——因为本仓库没有评估器能测 p99 完成时延，用缓存门限硬评会给出不可信结论。这是刻意设计的：
+
+```bash
+uv run archzero acc specs/noc_low_tail_collectives.md   # 逐项列出门限来自规范还是缺省值
+uv run archzero acc specs/demo.md                        # 对照：缓存问题四个门限全部来自条款
+```
+
 ### 1. 依赖与 API Key
 
-需要 Cursor **Pro 及以上**（Start 计划不含 SDK）。Python **≥ 3.11**，推荐 [`uv`](https://github.com/astral-sh/uv)。
+实跑 LLM 需要 Cursor **Pro 及以上**（Start 计划不含 SDK）。Python **≥ 3.11**，推荐 [`uv`](https://github.com/astral-sh/uv)。
 
 ```bash
 export CURSOR_API_KEY="cursor_..."   # Dashboard → Integrations
-uv sync --extra dev                  # 或: pip install -e ".[dev]"
 uv run archzero doctor               # 检查 API key / personas / sim / corpus
 ```
+
+缺 key 时 `doctor` 只报 warn 不退出——上面那些离线命令照常可用。
 
 可选：`uv run archzero init` 写入默认 `archzero.toml` 并创建 `.archzero/` 状态目录。
 
@@ -260,6 +280,31 @@ uv run archzero flow --spec specs/demo.md --patent   # 一条龙带专利
 
 ---
 
+## 验收指标契约：漏斗只评判它真能测的东西
+
+漏斗的数值门限只认四个缓存量：`miss_reduction`、`bw_delta_frac`、`magic_gap`、`area_mm2`。这带来一个隐蔽问题：一份写得很好的 NoC 或晶圆级问题包，其 ACC 讲的是 p99 完成时延、goodput、抖动鲁棒性，解析后会**静默退化成缓存缺省值**（`>=15% MPKI`、`<=5% DRAM 带宽`、`<=0.5 mm²`），而输出与真正解析出门限的缓存问题一模一样——研究者无从分辨自己的方案是按什么标准被裁决的。
+
+现在这条路被封住了：
+
+1. **指标注册表**（[`archzero/spec/metrics.py`](archzero/spec/metrics.py)）声明每个指标的单位、方向、领域，以及**谁能测它**。NoC / dataflow / wafer 指标目前 `evaluators` 为空，因为本仓库确实没有对应评估器。
+2. **门限带溯源**。`AcceptanceThresholds.defaulted` 记录哪些数字是条款里没有、由工具补上的缺省值；`archzero acc` 把它逐行打出来。
+3. **拒判而非误判**。`funnel.strict_acc = true`（默认）时，若一份规范的验收标准全靠无评估器的指标、且没有任何一条 ACC/REQ 给出漏斗能查的性能门限，则漏斗封顶在 Tier1，Tier2 报 `UNAVAILABLE`——与 Tier5/Tier6 缺工具时的立场一致。Tier0/Tier1 仍照常给出对抗评审，因为它们读的是条款文本，任何领域都成立。
+4. **别名按词边界匹配**。`admission control` 不再被当成 miss 相关需求（这正是 NoC 规范凭空获得 MPKI 门限的老路径之一）。
+
+```bash
+uv run archzero acc specs/demo.md                        # 四个门限全部「规范声明」→ 可评判
+uv run archzero acc specs/noc_low_tail_collectives.md    # 三个是缺省值 → 不可评判，附原因
+uv run archzero acc specs/demo.md --registry             # 附完整跨域指标注册表
+```
+
+想强行按缓存门限跑（结论不可信，自负）：`archzero.toml` 里设 `[funnel] strict_acc = false`。
+
+**给 SoC / WSE 研究者的现状说明**：`new-spec --domain noc|dataflow|wafer` 能脚手架出对的骨架。NoC 问题包现在会走解析式 `noc` 后端（8×6 iso-wire mesh/torus，p95/p99/goodput/利用率）；规范没给数值门限时只报数、不裁决。这不是 flit 级仿真。dataflow / wafer 仍无评估器，Tier2+ 继续拒判而不是给你一个关于 MPKI 的假 PASS。
+
+仿真后端由注册表解析（`archzero.sim.registry`）。`[sim].backend` 拼错不再静默退回 stub；第三方可通过 `archzero.sim_backends` entry-point 注册新评估器。
+
+---
+
 ## CLI 参数说明
 
 全局选项：任意子命令前可加 `-c` / `--config path.toml`（例如论文协议旁路 `archzero.paper.toml`）。  
@@ -354,7 +399,9 @@ run（生成 + Tier0…through）
 
 | 命令 | 关键参数 | 作用 |
 |------|----------|------|
-| `spec PATH` | `--lint/--no-lint`，`--register/--no-register` | 校验并（默认）登记问题包 |
+| `spec PATH` | `--lint/--no-lint`，`--register/--no-register` | 校验并（默认）登记问题包；附带 ACC 可评判性警告 |
+| `acc PATH` | `--registry` | **漏斗会按什么门限评判你的规范**：逐项标注「规范声明 / 缺省值」，并列出无评估器的指标 |
+| `new-spec` | `--title`，`--workload`，`--symptom`，`--constraint`，`--domain {cache,noc,dataflow,wafer}` | 按领域脚手架问题包骨架 |
 | `read PDF` | `-o insights.md`，`--personas a,b` | 多专家读论文 → 笔记 |
 | `ideate PDF` | `--spec`，`-o dir`，`--n` | Clean-room 出题到目录（不跑漏斗） |
 | `diverge` | `--spec`，`--cells`，`--per-cell`，`--lens`，`--domain`，`--dry-run` | 跨领域组合矩阵海量发散（不跑漏斗） |
@@ -576,4 +623,6 @@ uv run archzero report
 
 ## 许可与归属
 
-论文归属原作者（Karthikeyan Sankaralingam / NVIDIA Research）。本仓库为工程实现与对照笔记。各 submodule / 外部仓遵循其自身许可证。
+本仓库代码以 **[Apache-2.0](LICENSE)** 授权（含显式专利授权条款）。
+
+论文归属原作者（Karthikeyan Sankaralingam / NVIDIA Research）；本仓库为独立工程实现与对照笔记，不代表原作者立场。各 submodule / 外部仓遵循其自身许可证。

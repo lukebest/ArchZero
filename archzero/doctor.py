@@ -9,6 +9,7 @@ from pathlib import Path
 
 from archzero.config import ROOT, FactoryConfig
 from archzero.sim.backend import get_backend
+from archzero.sim.registry import UnknownSimBackend, registered_backends
 
 
 @dataclass
@@ -22,13 +23,23 @@ class Check:
 def run_doctor(cfg: FactoryConfig) -> list[Check]:
     checks: list[Check] = []
 
+    # A warning, not an error: the whole offline path (seed-demo, ui, acc, spec,
+    # e2e --offline, diverge --dry-run, report, export, compare) works without a
+    # key, and doctor is the first command a new user runs. Exiting 1 here used
+    # to make a fresh clone look broken.
     key = (cfg.cursor_api_key or os.environ.get("CURSOR_API_KEY") or "").strip()
     checks.append(
         Check(
             name="CURSOR_API_KEY",
             ok=bool(key),
-            detail="set" if key else "missing — export from Cursor Dashboard → Integrations",
-            severity="error",
+            detail=(
+                "set"
+                if key
+                else "missing — needed only for live LLM runs; export from "
+                "Cursor Dashboard → Integrations. Offline: seed-demo / ui / acc / "
+                "e2e --offline still work."
+            ),
+            severity="warn",
         )
     )
 
@@ -59,30 +70,43 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
         )
     )
 
-    backend = get_backend(cfg)
-    avail = backend.available()
-    if cfg.sim.backend == "stub":
-        sim_ok = True
-        sim_detail = "stub (synthetic evidence)"
-        sim_sev = "info"
-    elif avail:
-        sim_ok = True
-        sim_detail = "available"
-        sim_sev = "info"
-    else:
+    try:
+        backend = get_backend(cfg)
+        avail = backend.available()
+        if cfg.sim.backend == "stub":
+            sim_ok = True
+            sim_detail = "stub (synthetic evidence)"
+            sim_sev = "info"
+        elif avail:
+            sim_ok = True
+            sim_detail = "available"
+            sim_sev = "info"
+        else:
+            sim_ok = False
+            sim_detail = (
+                "unavailable — strict_evidence will mark T3+ UNAVAILABLE (no stub PASS)"
+                if cfg.funnel.strict_evidence
+                else "unavailable — may fall back depending on config"
+            )
+            sim_sev = "warn"
+    except UnknownSimBackend as exc:
         sim_ok = False
-        sim_detail = (
-            "unavailable — strict_evidence will mark T3+ UNAVAILABLE (no stub PASS)"
-            if cfg.funnel.strict_evidence
-            else "unavailable — may fall back depending on config"
-        )
-        sim_sev = "warn"
+        sim_detail = str(exc)
+        sim_sev = "error"
     checks.append(
         Check(
             name=f"sim backend ({cfg.sim.backend})",
             ok=sim_ok,
             detail=sim_detail,
             severity=sim_sev,
+        )
+    )
+    checks.append(
+        Check(
+            name="sim registry",
+            ok=True,
+            detail="registered: " + ", ".join(registered_backends()),
+            severity="info",
         )
     )
 
@@ -161,6 +185,21 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
             name="funnel.strict_evidence",
             ok=True,
             detail=str(cfg.funnel.strict_evidence),
+            severity="info",
+        )
+    )
+
+    from archzero.spec.metrics import METRIC_SPECS, unmeasurable_ids
+
+    checks.append(
+        Check(
+            name="funnel.strict_acc",
+            ok=True,
+            detail=(
+                f"{cfg.funnel.strict_acc} — {len(METRIC_SPECS) - len(unmeasurable_ids())}"
+                f"/{len(METRIC_SPECS)} registry metrics have an evaluator; "
+                f"check a spec with: archzero acc <spec.md>"
+            ),
             severity="info",
         )
     )

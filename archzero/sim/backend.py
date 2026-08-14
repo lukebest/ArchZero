@@ -38,20 +38,8 @@ class SimBackend(ABC):
     def run(self, req: SimRequest) -> SimResult: ...
 
 
-def get_backend(cfg: FactoryConfig) -> SimBackend:
-    name = (cfg.sim.backend or "stub").lower()
-    if name == "champsim":
-        from archzero.sim.champsim import ChampSimBackend
+def get_backend(cfg: FactoryConfig, name: str | None = None) -> SimBackend:
+    """Resolve a registered backend. Unknown names raise, they do not become stub."""
+    from archzero.sim.registry import resolve_backend
 
-        return ChampSimBackend(cfg)
-    if name == "gem5":
-        from archzero.sim.gem5 import Gem5Backend
-
-        return Gem5Backend(cfg)
-    if name == "directed":
-        from archzero.sim.directed import DirectedSimBackend
-
-        return DirectedSimBackend(cfg)
-    from archzero.sim.stub import StubSimBackend
-
-    return StubSimBackend(cfg)
+    return resolve_backend(cfg, name)

@@ -1,4 +1,10 @@
-"""ArchZero CLI — models | spec | new-spec | read | ideate | run | evolve | report | export."""
+"""ArchZero CLI.
+
+Offline (no API key): init | spec | acc | new-spec | seed-demo | ui | status |
+show | report | export | compare | reproduce | e2e --offline.
+Live (needs CURSOR_API_KEY): read | ideate | diverge | run | flow | frontier |
+evolve | patent.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +30,23 @@ console = Console()
 
 def _cfg(config: Optional[Path] = None):
     return load_config(config)
+
+
+def _print_acc_notice(result: dict) -> None:
+    """Tell the researcher when the funnel declined to grade their spec."""
+    acc = result.get("acc") or {}
+    if acc.get("clamped_from"):
+        console.print(
+            f"[red]漏斗封顶在 Tier1[/red]（原请求 {acc['clamped_from']}）"
+            f"— {acc.get('reason', '')}"
+        )
+        return
+    gaps = acc.get("unmeasurable_metrics") or []
+    if gaps:
+        console.print(
+            f"[yellow]评估盲区[/yellow] 以下声明指标无评估器，未被检查："
+            f"{', '.join(gaps)}"
+        )
 
 
 @app.callback()
@@ -88,7 +111,7 @@ def spec_cmd(
     register: bool = typer.Option(True, "--register/--no-register"),
 ) -> None:
     """Lint and optionally register an NDF-lite problem package."""
-    from archzero.spec.lint import lint_package
+    from archzero.spec.lint import lint_acceptance, lint_package
     from archzero.spec.ndf import load_problem_package
     from archzero.store.db import Store
 
@@ -101,12 +124,100 @@ def spec_cmd(
                 console.print(f"[yellow]lint[/yellow] {i}")
             raise typer.Exit(code=1)
         console.print("[green]lint ok[/green]")
+        # Structurally valid specs can still be ungradable. Warn, do not fail —
+        # registering an interconnect or wafer-scale problem is legitimate.
+        acc_issues = lint_acceptance(pp)
+        for i in acc_issues:
+            console.print(f"[yellow]acc[/yellow] {i}")
+        if acc_issues:
+            console.print("[dim]详情：archzero acc " + str(path) + "[/dim]")
     if register:
         store = Store(cfg.db_path)
         store.save_problem(pp)
         console.print(f"[green]registered[/green] problem {pp.id} — {pp.title}")
     else:
         console.print(f"parsed {pp.title} ({len(pp.clauses)} clauses)")
+
+
+@app.command("acc")
+def acc_cmd(
+    ctx: typer.Context,
+    path: Path = typer.Argument(..., help="Problem package markdown path"),
+    registry: bool = typer.Option(
+        False, "--registry", help="Also print the full cross-domain metric registry"
+    ),
+) -> None:
+    """Show exactly which thresholds the funnel will grade this spec on.
+
+    Every gate number is labelled as read from a clause or as a tool default,
+    so a NoC / wafer-scale spec can no longer be graded against cache numbers
+    without saying so.
+    """
+    from archzero.spec.acc_parse import parse_acceptance_thresholds
+    from archzero.spec.metrics import METRIC_BY_ID, registry_markdown
+    from archzero.spec.ndf import load_problem_package
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    pp = load_problem_package(path)
+    th = parse_acceptance_thresholds(pp)
+
+    console.print(f"[bold]{pp.title}[/bold]")
+    console.print(f"领域推断: [cyan]{th.domain}[/cyan]  ·  条款数: {len(pp.clauses)}\n")
+
+    table = Table(title="漏斗将使用的数值门限", show_lines=False)
+    table.add_column("gate")
+    table.add_column("值")
+    table.add_column("来源")
+    table.add_column("条款")
+    for gate_field, value, origin, clause in th.provenance_rows():
+        from_spec = origin == "规范声明"
+        table.add_row(
+            gate_field,
+            str(value),
+            f"[green]{origin}[/green]" if from_spec else f"[yellow]{origin}[/yellow]",
+            clause,
+        )
+    console.print(table)
+
+    if th.declared_metrics:
+        dtable = Table(title="ACC/REQ 中识别到的指标")
+        dtable.add_column("metric")
+        dtable.add_column("名称")
+        dtable.add_column("评估器")
+        for mid in th.declared_metrics:
+            spec = METRIC_BY_ID.get(mid)
+            if spec is None:
+                continue
+            evals = ", ".join(spec.evaluators)
+            dtable.add_row(
+                mid,
+                spec.name,
+                f"[green]{evals}[/green]" if evals else "[red]无（不会被检查）[/red]",
+            )
+        console.print(dtable)
+
+    if not th.gradable:
+        console.print(
+            f"\n[red]不可评判[/red] {th.ungradable_reason()}\n"
+            f"[dim]strict_acc={cfg.funnel.strict_acc}；为真时漏斗封顶在 Tier1，"
+            f"Tier2+ 报 UNAVAILABLE 而不给出缓存门限下的假结论。[/dim]"
+        )
+    elif th.report_only:
+        console.print(
+            f"\n[cyan]可测量 / 不裁决[/cyan] 将报告 "
+            f"{', '.join(th.measurable_performance)}，"
+            f"但规范未给出数值门限，漏斗不会据此 PASS/FAIL。"
+        )
+        if th.unmeasurable_note():
+            console.print(f"[yellow]部分盲区[/yellow] {th.unmeasurable_note()}")
+    elif th.unmeasurable_note():
+        console.print(f"\n[yellow]部分盲区[/yellow] {th.unmeasurable_note()}")
+    else:
+        console.print("\n[green]可评判[/green] 所有声明指标均有评估器支撑。")
+
+    if registry:
+        console.print()
+        console.print(registry_markdown())
 
 
 @app.command("read")
@@ -235,10 +346,11 @@ def run_cmd(
             diverge_per_cell=diverge_per_cell,
         )
     )
+    _print_acc_notice(result)
     console.print(
         f"[green]campaign[/green] {result['campaign_id']} "
         f"passed={result['passed']} failed={result['failed']} "
-        f"through={through}"
+        f"through={result.get('through', through)}"
     )
     if result.get("divergence"):
         dv = result["divergence"]
@@ -473,9 +585,11 @@ def flow_cmd(
         f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
         f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
     )
+    _print_acc_notice(result)
     console.print(
         f"[green]funnel[/green] {campaign_id} passed={result['passed']} "
-        f"failed={result['failed']} active={result['active']} through={through}"
+        f"failed={result['failed']} active={result['active']} "
+        f"through={result.get('through', through)}"
     )
 
     out.mkdir(parents=True, exist_ok=True)
@@ -569,8 +683,16 @@ def seed_demo_cmd(
         False, "--force", help="Create another demo campaign even if one exists"
     ),
 ) -> None:
-    """Seed an offline demo campaign (no LLM) so the funnel UI has sample data."""
-    from archzero.demo_seed import seed_demo_campaign
+    """Seed offline demo campaigns (no LLM) so the funnel UI has sample data.
+
+    Cache (gradable), NoC (measurable, report-only), and wafer-scale (still
+    refused) — so the honesty contract is visible before you spend an API key.
+    """
+    from archzero.demo_seed import (
+        seed_acc_refusal_campaign,
+        seed_demo_campaign,
+        seed_noc_report_campaign,
+    )
 
     cfg = _cfg(ctx.obj.get("config_path"))
     result = seed_demo_campaign(cfg, force=force)
@@ -583,6 +705,34 @@ def seed_demo_cmd(
         console.print(
             f"[yellow]exists[/yellow] campaign {result['campaign_id']} — {result['note']}"
         )
+
+    noc = seed_noc_report_campaign(cfg, force=force)
+    if noc.get("campaign_id"):
+        if noc["created"]:
+            console.print(
+                f"[green]seeded[/green] campaign {noc['campaign_id']} "
+                f"({noc['n_candidates']} NoC candidates, report-only) — "
+                f"解析模型给出 p99/goodput，规范未给门限故不裁决"
+            )
+        else:
+            console.print(
+                f"[yellow]exists[/yellow] campaign {noc['campaign_id']} — {noc['note']}"
+            )
+
+    refusal = seed_acc_refusal_campaign(cfg, force=force)
+    if refusal.get("campaign_id"):
+        if refusal["created"]:
+            console.print(
+                f"[green]seeded[/green] campaign {refusal['campaign_id']} "
+                f"（晶圆级，封顶 {refusal.get('through')}）— "
+                f"演示漏斗如何拒判仍无评估器的领域"
+            )
+        else:
+            console.print(
+                f"[yellow]exists[/yellow] campaign {refusal['campaign_id']} — "
+                f"{refusal['note']}"
+            )
+
     console.print(
         f"Inspect: [bold]archzero status {result['campaign_id']}[/bold]  ·  "
         f"[bold]archzero ui[/bold]"
@@ -609,6 +759,14 @@ def doctor_cmd(
             hard_fail = True
         table.add_row(c.name, mark, c.detail)
     console.print(table)
+    if not any(c.name == "CURSOR_API_KEY" and c.ok for c in checks):
+        console.print(
+            "[yellow]No API key[/yellow] — live LLM runs are blocked, but you can "
+            "explore now:\n"
+            "  [bold]archzero seed-demo && archzero ui[/bold]   离线看板\n"
+            "  [bold]archzero acc specs/demo.md[/bold]           漏斗会按什么门限评判\n"
+            "  [bold]archzero e2e --offline[/bold]               FakeLLM 走完 Tier0–5"
+        )
     if hard_fail:
         console.print(
             "[yellow]Fix errors above before running a live campaign "
@@ -745,28 +903,41 @@ def new_spec_cmd(
     workload: str = typer.Option(..., "--workload", help="Workload / suite description"),
     symptom: str = typer.Option(..., "--symptom", help="Observed bottleneck / symptom"),
     constraint: str = typer.Option(..., "--constraint", help="Hardware / resource constraint"),
+    domain: str = typer.Option(
+        "cache",
+        "--domain",
+        help="Clause template: cache | noc | dataflow | wafer",
+    ),
     out: Path = typer.Option(Path("specs"), "--out", "-o", help="Output directory"),
 ) -> None:
     """Scaffold an NDF-lite problem package from researcher fields, then lint."""
-    from archzero.spec.lint import lint_package
+    from archzero.spec.lint import lint_acceptance, lint_package
     from archzero.spec.ndf import load_problem_package
-    from archzero.spec.wizard import scaffold_problem
+    from archzero.spec.wizard import TEMPLATES, scaffold_problem
 
+    if domain not in TEMPLATES:
+        raise typer.BadParameter(
+            f"unknown domain {domain!r}; expected one of {', '.join(sorted(TEMPLATES))}"
+        )
     path = scaffold_problem(
         title=title,
         workload=workload,
         symptom=symptom,
         constraint=constraint,
+        domain=domain,
         out_dir=out,
     )
     pp = load_problem_package(path)
     issues = lint_package(pp)
-    console.print(f"[green]wrote[/green] {path}")
+    console.print(f"[green]wrote[/green] {path} [dim](domain={domain})[/dim]")
     if issues:
         for i in issues:
             console.print(f"[yellow]lint[/yellow] {i}")
         raise typer.Exit(code=1)
     console.print(f"[green]lint ok[/green] ({len(pp.clauses)} clauses) — {pp.id}")
+    for i in lint_acceptance(pp):
+        console.print(f"[yellow]acc[/yellow] {i}")
+    console.print(f"[dim]漏斗将按什么门限评判：archzero acc {path}[/dim]")
 
 
 @app.command("patent")

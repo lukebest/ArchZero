@@ -3,6 +3,8 @@ name = "archzero"
 version = "0.1.0"
 description = "Idea Factory for computer architecture — Generation + multi-tier Evaluation (telemetry deferred)"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "cursor-sdk>=0.1.0",
@@ -32,6 +34,10 @@ patent = [
 
 [project.scripts]
 archzero = "archzero.cli:app"
+
+[project.entry-points."archzero.sim_backends"]
+# Builtins register in-process. Third-party packages add factories here:
+#   my_noc = "mypkg.backends:build_noc"
 
 [build-system]
 requires = ["hatchling"]

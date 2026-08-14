@@ -19,7 +19,9 @@ from archzero.models import (
     TierResult,
     Verdict,
 )
-from archzero.sim.backend import SimRequest, get_backend
+from archzero.sim.backend import SimRequest
+from archzero.sim.metrics import SimMetrics
+from archzero.sim.registry import resolve_backend_for_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
 JUDGE_PERSONA = """你是体系结构漏斗的仿真终审。
@@ -57,7 +59,9 @@ async def evaluate_tier4(
     candidate.workdir = str(work)
     th = parse_acceptance_thresholds(problem)
 
-    backend = get_backend(cfg)
+    backend, backend_name, route_reason = resolve_backend_for_domain(cfg, th.domain)
+    if route_reason:
+        candidate.metrics["t4_backend_route"] = route_reason
     sim = backend.run(
         SimRequest(
             candidate_id=candidate.id,
@@ -71,6 +75,7 @@ async def evaluate_tier4(
                 "min_miss_reduction": th.min_miss_reduction,
                 "max_bw_delta_frac": th.max_bw_delta_frac,
                 "area_budget_mm2": th.area_budget_mm2,
+                "domain": th.domain,
             },
         )
     )
@@ -78,16 +83,19 @@ async def evaluate_tier4(
 
     evidence = EvidenceLevel.STUB
     ev = str(sim.metrics.get("evidence") or "")
-    if not sim.unavailable and cfg.sim.backend not in {"stub"}:
+    if not sim.unavailable and backend_name not in {"stub"}:
         evidence = EvidenceLevel.SIM
+    if ev == "analytic":
+        evidence = EvidenceLevel.ANALYTIC
     if ev == "stub":
         evidence = EvidenceLevel.STUB
     if ev == "directed":
         evidence = EvidenceLevel.SIM
 
-    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend not in {
+    if sim.unavailable and cfg.funnel.strict_evidence and backend_name not in {
         "stub",
         "directed",
+        "noc",
     }:
         result = TierResult(
             tier=Tier.T4,
@@ -119,17 +127,20 @@ async def evaluate_tier4(
         )
     except Exception as exc:  # noqa: BLE001
         # Fail closed on judge error when not stub; stub/directed uses ACC heuristic
-        reduction = float(sim.metrics.get("miss_reduction") or 0)
-        bw = float(sim.metrics.get("bw_delta_frac") or 0)
-        if cfg.sim.backend in {"stub", "directed"}:
-            ok = (
-                sim.ok
-                and reduction >= th.min_miss_reduction
-                and bw <= th.max_bw_delta_frac
-            )
+        known = set(SimMetrics.model_fields)
+        metrics_obj = SimMetrics.model_validate(
+            {k: v for k, v in sim.metrics.items() if k in known}
+        )
+        outcome = metrics_obj.apply_gates(th.spec_gates())
+        reduction = float(metrics_obj.miss_reduction or metrics_obj.goodput or 0)
+        if backend_name in {"stub", "directed", "noc"}:
+            ok = sim.ok and outcome.ok
             data = {
                 "verdict": "pass" if ok else "fail",
-                "summary": f"judge fallback ({cfg.sim.backend}): {exc}",
+                "summary": (
+                    f"judge fallback ({backend_name}): {exc}"
+                    + ("" if outcome.adjudicated else " [report-only]")
+                ),
                 "score": reduction,
             }
         else:

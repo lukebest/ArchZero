@@ -82,9 +82,15 @@ class Tier2RunResult:
 
 
 def _threshold_gate(metrics: dict, th: AcceptanceThresholds) -> tuple[bool, str]:
-    """Numeric ACC gate independent of model self-report."""
+    """Numeric ACC gate independent of model self-report.
+
+    Only spec-declared performance gates are applied. A NoC package that never
+    mentioned MPKI must not fail ``>=15% miss_reduction``.
+    """
+    if not th.has_spec_performance_gate:
+        return True, "report-only: no spec-declared performance gate"
     reduction = float(metrics.get("miss_reduction") or 0.0)
-    if reduction < th.min_miss_reduction:
+    if th.from_spec("min_miss_reduction") and reduction < th.min_miss_reduction:
         return False, (
             f"miss_reduction {reduction:.3f} < ACC min {th.min_miss_reduction:.3f}"
         )
@@ -94,11 +100,11 @@ def _threshold_gate(metrics: dict, th: AcceptanceThresholds) -> tuple[bool, str]
         bw = metrics.get("extra_bw")
     if bw is None:
         bw = metrics.get("bw_overhead")
-    if bw is not None and float(bw) > th.max_bw_delta_frac:
+    if th.from_spec("max_bw_delta_frac") and bw is not None and float(bw) > th.max_bw_delta_frac:
         return False, (
             f"bw_delta_frac {float(bw):.3f} > ACC max {th.max_bw_delta_frac:.3f}"
         )
-    if th.area_budget_mm2 is not None:
+    if th.from_spec("area_budget_mm2") and th.area_budget_mm2 is not None:
         area = metrics.get("area_mm2")
         if area is None:
             area = metrics.get("area")
@@ -299,6 +305,24 @@ async def evaluate_tier2(
     arts = ArtifactStore(cfg.artifacts_dir)
 
     th = parse_acceptance_thresholds(problem)
+    if cfg.funnel.strict_acc and not th.gradable:
+        # The candidate is not bad — the spec cannot be graded. Same stance as
+        # Tier3/Tier5 when a backend is missing: record UNAVAILABLE, do not
+        # invent a numeric verdict, and do not mark the candidate failed.
+        result = TierResult(
+            tier=Tier.T2,
+            verdict=Verdict.UNAVAILABLE,
+            score=0.0,
+            summary=f"Tier2 拒判（strict_acc）：{th.ungradable_reason()}",
+            metrics={"thresholds": th.as_dict(), "acc_gradable": False},
+            artifacts=[],
+            evidence=EvidenceLevel.ANALYTIC,
+            clause_refs=candidate.clause_refs,
+        )
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        return candidate
+
     constraints = "\n".join(f"{c.id}: {c.text}" for c in problem.clauses)
     base = (
         f"PROBLEM:\n{problem.title}\n{constraints}\n\n"

@@ -27,6 +27,7 @@ from archzero.models import (
     Tier,
     Verdict,
 )
+from archzero.spec.acc_parse import parse_acceptance_thresholds
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
 
@@ -52,6 +53,44 @@ TIER_FNS: dict[Tier, TierFn] = {
 
 def _content_hash(title: str, mechanism: str) -> str:
     return hashlib.sha256((title + "\n" + mechanism).encode()).hexdigest()[:16]
+
+
+def acc_gate_for_campaign(
+    cfg: FactoryConfig, problem: ProblemPackage, through: Tier
+) -> tuple[Tier, dict[str, Any]]:
+    """How far can the numeric tiers honestly grade this problem package?
+
+    Tier0/Tier1 read clause text and stay useful in any domain. Tier2+ gate on
+    four cache numbers, so a spec whose acceptance criteria live outside that
+    vocabulary gets clamped to Tier1 rather than spending a few hundred LLM
+    calls on its way to a verdict that would have been about MPKI.
+    """
+    th = parse_acceptance_thresholds(problem)
+    from archzero.sim.registry import backend_name_for_domain
+
+    resolved_backend, route_reason = backend_name_for_domain(
+        cfg.sim.backend or "stub", th.domain
+    )
+    meta: dict[str, Any] = {
+        "domain": th.domain,
+        "gradable": th.gradable,
+        "report_only": th.report_only,
+        "measurable_performance": list(th.measurable_performance),
+        "defaulted_gates": sorted(th.defaulted),
+        "unmeasurable_metrics": list(th.unmeasurable_metrics),
+        "backend": resolved_backend,
+    }
+    if route_reason:
+        meta["backend_route"] = route_reason
+    if (
+        cfg.funnel.strict_acc
+        and not th.gradable
+        and TIER_ORDER.index(through) > TIER_ORDER.index(Tier.T1)
+    ):
+        meta["clamped_from"] = through.value
+        meta["reason"] = th.ungradable_reason()
+        return Tier.T1, meta
+    return through, meta
 
 
 def _load_seeds(seed_dir: Path, problem: ProblemPackage) -> list[Candidate]:
@@ -294,11 +333,17 @@ async def run_campaign(
     except NotImplementedError:
         pass
 
+    through, acc_meta = acc_gate_for_campaign(cfg, problem, through)
+
     campaign = Campaign(
         name=name or f"{problem.title} → {through.value}",
         problem_id=problem.id,
         through_tier=through,
-        meta={"expand_frontier": expand_frontier, "auto_round": auto_round},
+        meta={
+            "expand_frontier": expand_frontier,
+            "auto_round": auto_round,
+            "acc": acc_meta,
+        },
     )
     store.save_campaign(campaign)
 
@@ -491,6 +536,7 @@ async def run_campaign(
             "passed": passed_n,
             "failed": failed_n,
             "active": len(active),
+            "acc": acc_meta,
             "usage": store.usage_totals(campaign.id),
         }
         if campaign.meta.get("divergence"):

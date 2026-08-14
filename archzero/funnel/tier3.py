@@ -18,12 +18,13 @@ from archzero.models import (
     TierResult,
     Verdict,
 )
-from archzero.sim.backend import SimRequest, get_backend
+from archzero.sim.backend import SimRequest
 from archzero.sim.champsim_config import write_champsim_scaffold
 from archzero.sim.gem5_harness import write_gem5_harness
 from archzero.sim.generate import generate_dedicated_sim, generate_dedicated_sim_llm
 from archzero.sim.mechanism_model import report_magic_gap
 from archzero.sim.metrics import SimMetrics
+from archzero.sim.registry import resolve_backend_for_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
 HARNESS_PERSONA = """You prepare a simulation harness for an architecture mechanism.
@@ -110,7 +111,9 @@ async def evaluate_tier3(
             "miss_reduction"
         )
 
-    backend = get_backend(cfg)
+    backend, backend_name, route_reason = resolve_backend_for_domain(cfg, th.domain)
+    if route_reason:
+        candidate.metrics["t3_backend_route"] = route_reason
     sim = backend.run(
         SimRequest(
             candidate_id=candidate.id,
@@ -124,34 +127,36 @@ async def evaluate_tier3(
                 "min_miss_reduction": th.min_miss_reduction,
                 "max_bw_delta_frac": th.max_bw_delta_frac,
                 "area_budget_mm2": th.area_budget_mm2,
+                "domain": th.domain,
             },
         )
     )
     candidate.metrics.update({f"t3_{k}": v for k, v in sim.metrics.items()})
 
-    reduction = float(sim.metrics.get("miss_reduction") or 0)
-    bw = float(sim.metrics.get("bw_delta_frac") or 0)
-    area = sim.metrics.get("area_mm2")
-    if area is None:
-        area = knobs_data.get("area")
-    metrics_obj = SimMetrics(
-        miss_reduction=reduction,
-        bw_delta_frac=bw,
-        area_mm2=float(area) if area is not None else None,
-        evidence=str(sim.metrics.get("evidence") or "stub"),
-        backend=sim.backend,
+    known = set(SimMetrics.model_fields)
+    metrics_obj = SimMetrics.model_validate(
+        {k: v for k, v in sim.metrics.items() if k in known}
     )
-    gate_ok = sim.ok and metrics_obj.gate_ok(
-        min_reduction=th.min_miss_reduction,
-        max_bw=th.max_bw_delta_frac,
-        area_budget_mm2=th.area_budget_mm2,
-    )
+    outcome = metrics_obj.apply_gates(th.spec_gates())
+    gate_ok = sim.ok and outcome.ok
+    candidate.metrics["t3_adjudicated"] = outcome.adjudicated
+    reduction = metrics_obj.miss_reduction
+    bw = metrics_obj.bw_delta_frac
+    if reduction is None:
+        reduction = 0.0
+    if bw is None:
+        bw = 0.0
 
     # Paper profile: dedicated_sim is adjudicating evidence, not audit-only.
     if cfg.funnel.llm_dedicated_sim and not gen.selftest_ok:
         gate_ok = False
         candidate.metrics["t3_dedicated_adjudication"] = "selftest_fail"
-    elif cfg.funnel.llm_dedicated_sim and gen.selftest_ok and gen.metrics:
+    elif (
+        cfg.funnel.llm_dedicated_sim
+        and gen.selftest_ok
+        and gen.metrics
+        and th.from_spec("min_miss_reduction")
+    ):
         ded_red = float(gen.metrics.get("miss_reduction") or 0.0)
         if ded_red < th.min_miss_reduction:
             gate_ok = False
@@ -160,28 +165,31 @@ async def evaluate_tier3(
             candidate.metrics["t3_dedicated_adjudication"] = "ok"
 
     model_red = candidate.metrics.get("t2_miss_reduction")
-    gap = report_magic_gap(
-        float(model_red) if model_red is not None else None,
-        reduction,
-    )
-    if gap is not None:
-        candidate.metrics["t3_magic_gap"] = gap
-        if gap > th.max_magic_gap:
-            gate_ok = False
+    sim_red = metrics_obj.miss_reduction
+    gap = None
+    if model_red is not None and sim_red is not None:
+        gap = report_magic_gap(float(model_red), float(sim_red))
+        if gap is not None:
+            candidate.metrics["t3_magic_gap"] = gap
+            if th.from_spec("max_magic_gap") and gap > th.max_magic_gap:
+                gate_ok = False
 
     evidence = EvidenceLevel.STUB
     ev = str(sim.metrics.get("evidence") or "")
     if ev == "directed":
         evidence = EvidenceLevel.SIM
-    elif ev == "sim" or (not sim.unavailable and cfg.sim.backend not in {"stub", "directed"}):
+    elif ev == "analytic":
+        evidence = EvidenceLevel.ANALYTIC
+    elif ev == "sim" or (not sim.unavailable and backend_name not in {"stub", "directed"}):
         evidence = EvidenceLevel.SIM
     if ev == "stub":
         evidence = EvidenceLevel.STUB
 
     # Fail-closed: configured real backend unavailable → UNAVAILABLE, never PASS
-    if sim.unavailable and cfg.funnel.strict_evidence and cfg.sim.backend not in {
+    if sim.unavailable and cfg.funnel.strict_evidence and backend_name not in {
         "stub",
         "directed",
+        "noc",
     }:
         verdict = Verdict.UNAVAILABLE
         summary = (
@@ -205,8 +213,8 @@ async def evaluate_tier3(
         candidate.status = "active"
         return candidate
 
-    if cfg.sim.backend == "stub" or evidence == EvidenceLevel.STUB:
-        if cfg.sim.backend not in {"stub", "directed"} and cfg.funnel.strict_evidence:
+    if backend_name == "stub" or evidence == EvidenceLevel.STUB:
+        if backend_name not in {"stub", "directed", "noc"} and cfg.funnel.strict_evidence:
             verdict = Verdict.UNAVAILABLE
             summary = f"{sim.backend}: stub evidence rejected under strict_evidence"
         else:
@@ -220,15 +228,27 @@ async def evaluate_tier3(
     else:
         verdict = Verdict.PASS if gate_ok else Verdict.FAIL
         gap_note = f" magic_gap={gap:.2f}" if gap is not None else ""
-        summary = (
-            f"{sim.backend}: reduction={reduction:.2%} bwΔ={bw:.2%} "
-            f"ok={gate_ok}{gap_note}"
-        )
+        if metrics_obj.p99_latency is not None:
+            adj = "report-only" if not outcome.adjudicated else f"ok={gate_ok}"
+            summary = (
+                f"{sim.backend}: p99={metrics_obj.p99_latency:.0f}cyc "
+                f"goodput={metrics_obj.goodput or 0:.2f} {adj}{gap_note}"
+            )
+        else:
+            summary = (
+                f"{sim.backend}: reduction={reduction:.2%} bwΔ={bw:.2%} "
+                f"ok={gate_ok}{gap_note}"
+            )
 
+    score = (
+        float(metrics_obj.goodput)
+        if metrics_obj.goodput is not None
+        else float(reduction)
+    )
     result = TierResult(
         tier=Tier.T3,
         verdict=verdict,
-        score=reduction,
+        score=score,
         summary=summary,
         metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap,
                  "dedicated_selftest": gen.selftest_ok,
