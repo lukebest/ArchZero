@@ -8,7 +8,9 @@ from pathlib import Path
 
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimBackend, SimRequest, SimResult
+from archzero.sim.families import CACHE, request_domain
 from archzero.sim.gem5_harness import write_gem5_harness
+from archzero.sim.inapplicable import off_cache_sim_result
 from archzero.sim.metrics import SimMetrics, compute_reduction
 from archzero.sim.parse_gem5 import parse_stats_txt
 from archzero.sim.stub import StubSimBackend
@@ -26,6 +28,17 @@ class Gem5Backend(SimBackend):
         return bool(bin_path and Path(bin_path).exists())
 
     def run(self, req: SimRequest) -> SimResult:
+        loaded: dict = {}
+        knob_path = req.workdir / "sim_knobs.json"
+        if knob_path.exists():
+            try:
+                loaded.update(json.loads(knob_path.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                pass
+        domain = request_domain(req.meta, loaded)
+        if domain != CACHE:
+            return off_cache_sim_result("gem5", domain)
+
         if not self.available():
             result = self._fallback.run(req)
             result.backend = "gem5-unavailable→stub"
@@ -37,16 +50,15 @@ class Gem5Backend(SimBackend):
         bin_path = Path(self.cfg.sim.gem5_bin)  # type: ignore[arg-type]
         script = req.workdir / "run_gem5.py"
         if not script.exists():
-            write_gem5_harness(req.workdir)
+            write_gem5_harness(
+                req.workdir,
+                family=req.meta.get("family"),
+                domain=req.meta.get("domain"),
+            )
             script = req.workdir / "run_gem5.py"
 
         knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
-        knob_path = req.workdir / "sim_knobs.json"
-        if knob_path.exists():
-            try:
-                knobs.update(json.loads(knob_path.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
-                pass
+        knobs.update(loaded)
 
         try:
             proc = subprocess.run(

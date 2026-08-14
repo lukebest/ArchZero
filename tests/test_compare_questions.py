@@ -23,9 +23,14 @@ def test_compare_and_next_questions(tmp_path):
     data = compare_campaigns(cfg, a["campaign_id"], b["campaign_id"])
     assert data["a"]["n_candidates"] == 5
     assert data["b"]["n_candidates"] == 5
+    assert "survivors_detail" in data["a"]
+    assert "survivors_detail" in data["b"]
+    assert isinstance(data["a"]["survivors_detail"], list)
     assert len(data["funnel"]) == 7  # Tier0–Tier6 (T6 reserved)
     text = format_compare_text(data)
     assert "Compare campaigns" in text
+    assert "| Tier |" in text
+    assert "## Headlines" in text
 
     q = questions_from_campaign(cfg, a["campaign_id"])
     assert q["n_failures"] >= 1

@@ -39,3 +39,29 @@ def test_export_seed_demo_campaign(tmp_path):
     assert (root / "README.md").is_file()
     cand_mds = list((root / "candidates").glob("*.md"))
     assert len(cand_mds) >= 1
+
+def test_export_noc_seed_has_headlines(tmp_path):
+    import json
+
+    from archzero.demo_seed import seed_noc_report_campaign
+
+    cfg = FactoryConfig(
+        state_dir=tmp_path / "state",
+        gauntlet_personas=tmp_path / "personas",
+    )
+    cfg.ensure_dirs()
+    cfg.gauntlet_personas.mkdir(parents=True, exist_ok=True)
+    result = seed_noc_report_campaign(cfg)
+    root = export_campaign_bundle(cfg, result["campaign_id"], tmp_path / "bundles")
+    index = json.loads((root / "candidates.json").read_text(encoding="utf-8"))
+    assert index
+    assert all("headlines" in e for e in index)
+    with_p99 = [
+        e
+        for e in index
+        if any(h.get("key") == "p99_latency" for h in e.get("headlines") or [])
+    ]
+    assert with_p99
+    md = (root / "candidates" / f"{with_p99[0]['id']}.md").read_text(encoding="utf-8")
+    assert "Headlines:" in md
+

@@ -7,6 +7,7 @@ from pathlib import Path
 from archzero.config import FactoryConfig
 from archzero.funnel.taxonomy import summarize_failures
 from archzero.models import Tier, Verdict
+from archzero.sim.headlines import headlines_text
 from archzero.store.db import Store
 
 
@@ -108,10 +109,12 @@ def build_report(cfg: FactoryConfig, campaign_id: str | None = None) -> str:
         lines.append("")
         for c in survivors[:10]:
             lt = c.last_tier()
+            hl = headlines_text(c.metrics, family=c.family)
+            extra = f" {hl}" if hl else ""
             lines.append(
                 f"- `{c.id}` **{c.title}** ({c.family}) "
                 f"last={lt.tier.value if lt else '—'} "
-                f"score={lt.score if lt else '—'}"
+                f"score={lt.score if lt else '—'}{extra}"
             )
         if not survivors:
             lines.append("- (none)")

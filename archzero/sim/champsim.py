@@ -10,6 +10,8 @@ from pathlib import Path
 from archzero.config import FactoryConfig
 from archzero.sim.backend import SimBackend, SimRequest, SimResult
 from archzero.sim.champsim_config import write_champsim_scaffold
+from archzero.sim.families import CACHE, request_domain
+from archzero.sim.inapplicable import off_cache_sim_result
 from archzero.sim.metrics import SimMetrics, TraceMetrics, compute_reduction, geo_mean
 from archzero.sim.parse_champsim import parse_champsim_stdout
 from archzero.sim.stub import StubSimBackend
@@ -73,6 +75,17 @@ class ChampSimBackend(SimBackend):
         return parsed
 
     def run(self, req: SimRequest) -> SimResult:
+        loaded: dict = {}
+        knob_path = req.workdir / "sim_knobs.json"
+        if knob_path.exists():
+            try:
+                loaded.update(json.loads(knob_path.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                pass
+        domain = request_domain(req.meta, loaded)
+        if domain != CACHE:
+            return off_cache_sim_result("champsim", domain)
+
         if not self.available():
             result = self._fallback.run(req)
             result.backend = "champsim-unavailable→stub"
@@ -83,7 +96,8 @@ class ChampSimBackend(SimBackend):
 
         bin_path = Path(self.cfg.sim.champsim_bin)  # type: ignore[arg-type]
         traces = resolve_traces(self.cfg, req.suite)
-        knobs = self._load_knobs(req.workdir)
+        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
+        knobs.update(loaded)
         write_champsim_scaffold(
             req.workdir,
             family=str(req.meta.get("family") or knobs.get("family") or ""),

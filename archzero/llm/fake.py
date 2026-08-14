@@ -85,10 +85,24 @@ class FakeLLM:
                 if "def run_model" in code:
                     (cwd / "model.py").write_text(code, encoding="utf-8")
         if "sim_knobs" in instruction.lower() and not (cwd / "sim_knobs.json").exists():
-            (cwd / "sim_knobs.json").write_text(
-                '{"miss_reduction": 0.18, "extra_bw": 0.02, "area": 0.25}',
-                encoding="utf-8",
-            )
+            persona_l = persona.lower()
+            instr_l = instruction.lower()
+            if (
+                "do not invent miss_reduction" in persona_l
+                or "off-cache" in persona_l
+            ):
+                if "dataflow" in instr_l:
+                    knobs_blob = '{"family": "output_stationary", "domain": "dataflow"}'
+                elif "wafer" in instr_l:
+                    knobs_blob = '{"family": "mesh_xy", "domain": "wafer"}'
+                else:
+                    knobs_blob = '{"family": "request_grant", "domain": "noc"}'
+                (cwd / "sim_knobs.json").write_text(knobs_blob, encoding="utf-8")
+            else:
+                (cwd / "sim_knobs.json").write_text(
+                    '{"miss_reduction": 0.18, "extra_bw": 0.02, "area": 0.25}',
+                    encoding="utf-8",
+                )
         if "design.py" in instruction.lower() and not (cwd / "design.py").exists():
             (cwd / "design.py").write_text(
                 "# fake design\n", encoding="utf-8"

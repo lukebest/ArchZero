@@ -27,9 +27,23 @@ from archzero.sim.metrics import SimMetrics
 from archzero.sim.registry import resolve_backend_for_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
-HARNESS_PERSONA = """You prepare a simulation harness for an architecture mechanism.
+HARNESS_PERSONA_CACHE = """You prepare a simulation harness for an architecture mechanism.
 Write sim_knobs.json with miss_reduction, extra_bw, area reflecting the mechanism.
 Optionally write a brief SIM_PLAN.md. Keep knobs physically plausible."""
+
+HARNESS_PERSONA_DOMAIN = """You prepare a simulation harness for an off-cache architecture
+mechanism (NoC / dataflow / wafer-scale fabric). Write sim_knobs.json with a
+`family` key naming the mechanism family and a `domain` key. Do NOT invent
+miss_reduction, extra_bw, or area — those are cache metrics and do not apply.
+Optionally write a brief SIM_PLAN.md."""
+
+HARNESS_PERSONA = HARNESS_PERSONA_CACHE
+
+
+def _harness_persona(domain: str) -> str:
+    if domain in {"noc", "dataflow", "wafer"}:
+        return HARNESS_PERSONA_DOMAIN
+    return HARNESS_PERSONA_CACHE
 
 
 async def evaluate_tier3(
@@ -49,24 +63,36 @@ async def evaluate_tier3(
         "Create sim_knobs.json for the stub/ChampSim/gem5/directed adapter."
     )
     try:
-        await llm.work(HARNESS_PERSONA, instruction, TaskClass.ANALYTIC, cwd=work)
+        await llm.work(_harness_persona(th.domain), instruction, TaskClass.ANALYTIC, cwd=work)
     except Exception:  # noqa: BLE001
         knobs = work / "sim_knobs.json"
         if not knobs.exists():
-            knobs.write_text(
-                json.dumps(
-                    {
-                        "miss_reduction": float(
-                            candidate.metrics.get("t2_miss_reduction") or 0.18
-                        ),
-                        "extra_bw": 0.02,
-                        "area": 0.3,
-                        "family": candidate.family or "other",
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            if th.domain != "cache":
+                knobs.write_text(
+                    json.dumps(
+                        {
+                            "family": candidate.family,
+                            "domain": th.domain,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            else:
+                knobs.write_text(
+                    json.dumps(
+                        {
+                            "miss_reduction": float(
+                                candidate.metrics.get("t2_miss_reduction") or 0.18
+                            ),
+                            "extra_bw": 0.02,
+                            "area": 0.3,
+                            "family": candidate.family or "other",
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
 
     # Generate audit-able dedicated simulator source (prefetch/replacement/bypass…)
     knobs_path = work / "sim_knobs.json"
@@ -103,10 +129,14 @@ async def evaluate_tier3(
         )
         candidate.metrics["t3_champsim_module"] = sc.get("module")
     if cfg.sim.backend == "gem5":
-        gh = write_gem5_harness(work, knobs=knobs_data)
+        gh = write_gem5_harness(
+            work, knobs=knobs_data, family=candidate.family, domain=th.domain
+        )
         candidate.metrics["t3_gem5_harness"] = gh.get("path")
+        if "inapplicable" in gh:
+            candidate.metrics["t3_gem5_inapplicable"] = gh["inapplicable"]
     candidate.metrics["t3_dedicated_family"] = gen.family
-    if gen.selftest_ok and gen.metrics:
+    if gen.selftest_ok and gen.metrics and "miss_reduction" in gen.metrics:
         candidate.metrics["t3_dedicated_miss_reduction"] = gen.metrics.get(
             "miss_reduction"
         )
@@ -190,6 +220,8 @@ async def evaluate_tier3(
         "stub",
         "directed",
         "noc",
+        "dataflow",
+        "wafer",
     }:
         verdict = Verdict.UNAVAILABLE
         summary = (
@@ -214,7 +246,7 @@ async def evaluate_tier3(
         return candidate
 
     if backend_name == "stub" or evidence == EvidenceLevel.STUB:
-        if backend_name not in {"stub", "directed", "noc"} and cfg.funnel.strict_evidence:
+        if backend_name not in {"stub", "directed", "noc", "dataflow", "wafer"} and cfg.funnel.strict_evidence:
             verdict = Verdict.UNAVAILABLE
             summary = f"{sim.backend}: stub evidence rejected under strict_evidence"
         else:
@@ -233,6 +265,18 @@ async def evaluate_tier3(
             summary = (
                 f"{sim.backend}: p99={metrics_obj.p99_latency:.0f}cyc "
                 f"goodput={metrics_obj.goodput or 0:.2f} {adj}{gap_note}"
+            )
+        elif metrics_obj.pe_utilization is not None:
+            adj = "report-only" if not outcome.adjudicated else f"ok={gate_ok}"
+            summary = (
+                f"{sim.backend}: pe_utilization={metrics_obj.pe_utilization:.2f} "
+                f"{adj}{gap_note}"
+            )
+        elif metrics_obj.die_to_die_bw is not None:
+            adj = "report-only" if not outcome.adjudicated else f"ok={gate_ok}"
+            summary = (
+                f"{sim.backend}: die_to_die_bw={metrics_obj.die_to_die_bw:.1f} "
+                f"{adj}{gap_note}"
             )
         else:
             summary = (

@@ -21,3 +21,27 @@ def test_stub_sim_deterministic(tmp_path):
     )
     assert r1.ok
     assert r1.metrics["mpki"] == r2.metrics["mpki"]
+
+
+
+def test_stub_does_not_invent_mpki_for_noc_domain(tmp_path):
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    backend = get_backend(cfg)
+    work = tmp_path / "w"
+    work.mkdir()
+    r = backend.run(
+        SimRequest(
+            candidate_id="c-noc",
+            workdir=work,
+            patch_hint="request-grant",
+            suite="small",
+            meta={"domain": "noc", "family": "request_grant"},
+        )
+    )
+    assert r.ok
+    assert r.metrics.get("domain") == "noc"
+    assert "miss_reduction" not in r.metrics
+    assert "mpki" not in r.metrics
+    assert "ipc" not in r.metrics
+    assert r.metrics.get("evidence") == "stub"

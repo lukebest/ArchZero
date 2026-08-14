@@ -12,6 +12,54 @@ from archzero.evolve.backend import EvolutionBackend
 from archzero.evolve.mapelites import MapElitesBackend
 from archzero.llm.shim import OpenAIShim
 from archzero.models import Candidate
+from archzero.sim.families import CACHE, DATAFLOW, NOC, WAFER, family_domain
+
+EVAL_KEY = {
+    NOC: "goodput",
+    DATAFLOW: "pe_utilization",
+    WAFER: "die_to_die_bw",
+    CACHE: "miss_reduction",
+}
+
+
+def evolve_domain(
+    cfg: FactoryConfig, campaign_id: str | None, seeds: list[Candidate]
+) -> str:
+    """Parse problem ACC domain if campaign exists; else family; else cache."""
+    if campaign_id:
+        from archzero.spec.acc_parse import parse_acceptance_thresholds
+        from archzero.store.db import Store
+
+        store = Store(cfg.db_path)
+        camp = store.get_campaign(campaign_id)
+        if camp:
+            problem = store.get_problem(camp.problem_id)
+            if problem is not None:
+                domain = parse_acceptance_thresholds(problem).domain
+                if domain in {NOC, DATAFLOW, WAFER, CACHE}:
+                    return domain
+    if seeds:
+        return family_domain(seeds[0].family)
+    return CACHE
+
+
+def seed_program_sources(domain: str, family: str) -> tuple[str, str]:
+    """Return (initial_program.py, evaluator.py) text shaped for the domain."""
+    key = EVAL_KEY.get(domain, "miss_reduction")
+    program = (
+        "from archzero.evolve.domains import score_variant\n"
+        "\n"
+        "def run_model():\n"
+        f"    return score_variant({domain!r}, {family!r}, {{}})\n"
+    )
+    evaluator = (
+        "def evaluate(program_path):\n"
+        "    import runpy\n"
+        "    ns = runpy.run_path(program_path)\n"
+        "    m = ns['run_model']()\n"
+        f"    return float(m.get({key!r}) or 0)\n"
+    )
+    return program, evaluator
 
 
 class OpenEvolveBackend(EvolutionBackend):
@@ -38,26 +86,15 @@ class OpenEvolveBackend(EvolutionBackend):
         shim = OpenAIShim(cfg)
         base_url = shim.start()
         try:
-            # Write a minimal eval program from best seed
             seed = seeds[0]
+            domain = evolve_domain(cfg, campaign_id, seeds)
             work = cfg.scratch_dir / f"oe_{campaign_id or 'adhoc'}"
             work.mkdir(parents=True, exist_ok=True)
             prog = work / "initial_program.py"
-            prog.write_text(
-                "def run_model():\n"
-                f"    return {{'miss_reduction': {float(seed.metrics.get('t2_miss_reduction') or 0.12)},"
-                f" 'meets_target': True}}\n",
-                encoding="utf-8",
-            )
+            eval_prog, evaluator_src = seed_program_sources(domain, seed.family or "")
+            prog.write_text(eval_prog, encoding="utf-8")
             evaluator = work / "evaluator.py"
-            evaluator.write_text(
-                "def evaluate(program_path):\n"
-                "    import runpy\n"
-                "    ns = runpy.run_path(program_path)\n"
-                "    m = ns['run_model']()\n"
-                "    return float(m.get('miss_reduction') or 0)\n",
-                encoding="utf-8",
-            )
+            evaluator.write_text(evaluator_src, encoding="utf-8")
             env = os.environ.copy()
             env["OPENAI_API_BASE"] = base_url
             env["OPENAI_BASE_URL"] = base_url
@@ -82,6 +119,7 @@ class OpenEvolveBackend(EvolutionBackend):
             result["openevolve_shim"] = base_url
             result["openevolve_stdout"] = proc.stdout
             result["backend"] = "openevolve+mapelites-bridge"
+            result["evolve_domain"] = domain
             return result
         finally:
             shim.stop()

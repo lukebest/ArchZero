@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from archzero.sim.families import CACHE, DATAFLOW, NOC, WAFER, family_domain
 from archzero.sim.mechanism_model import MechanismParams, infer_params
 
 
@@ -108,8 +109,51 @@ def run_sim( knobs: dict ) -> dict:
     }}
 '''
 
+_NOC_BODY = '''
+def run_sim( knobs: dict ) -> dict:
+    """NoC event-model simulator (generated)."""
+    from archzero.analytic.domains import noc_model
+    family = str(knobs.get("family") or "{family}")
+    out = dict(noc_model(family))
+    out["evidence"] = "dedicated"
+    out["backend"] = "dedicated-noc"
+    out["family"] = family
+    return out
+'''
+
+_DATAFLOW_BODY = '''
+def run_sim( knobs: dict ) -> dict:
+    """Dataflow event-model simulator (generated)."""
+    from archzero.analytic.domains import dataflow_model
+    family = str(knobs.get("family") or "{family}")
+    out = dict(dataflow_model(family))
+    out["evidence"] = "dedicated"
+    out["backend"] = "dedicated-dataflow"
+    out["family"] = family
+    return out
+'''
+
+_WAFER_BODY = '''
+def run_sim( knobs: dict ) -> dict:
+    """Wafer-scale fabric event-model simulator (generated)."""
+    from archzero.analytic.domains import wafer_model
+    family = str(knobs.get("family") or "{family}")
+    out = dict(wafer_model(family))
+    out["evidence"] = "dedicated"
+    out["backend"] = "dedicated-wafer"
+    out["family"] = family
+    return out
+'''
+
 
 def _body_for(params: MechanismParams) -> str:
+    kind = family_domain(params.family)
+    if kind == NOC:
+        return _NOC_BODY.format(family=params.family)
+    if kind == DATAFLOW:
+        return _DATAFLOW_BODY.format(family=params.family)
+    if kind == WAFER:
+        return _WAFER_BODY.format(family=params.family)
     fam = params.family
     if fam in {"prefetch", "filter", "streamer"}:
         return _PREFETCH_BODY.format(
@@ -137,6 +181,30 @@ def _body_for(params: MechanismParams) -> str:
         base=params.base_reduction,
         bw=params.extra_bw,
     )
+
+
+def _selftest_ok(metrics: dict[str, Any]) -> bool:
+    """Accept cache miss_reduction *or* a domain-native metric."""
+    if "miss_reduction" in metrics:
+        try:
+            if 0.0 <= float(metrics["miss_reduction"]) <= 1.0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    if metrics.get("goodput") is not None or metrics.get("p99_latency") is not None:
+        return True
+    if "pe_utilization" in metrics:
+        try:
+            if 0.0 <= float(metrics["pe_utilization"]) <= 1.0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    if (
+        metrics.get("die_to_die_bw") is not None
+        or metrics.get("fabric_hop_latency") is not None
+    ):
+        return True
+    return False
 
 
 def render_dedicated_sim(params: MechanismParams) -> str:
@@ -178,6 +246,8 @@ def generate_dedicated_sim(
         "miss_reduction": params.base_reduction,
         "extra_bw": params.extra_bw,
         "area": params.area_mm2,
+        "family": params.family,
+        "domain": family_domain(params.family),
     }
     proc = subprocess.run(
         [sys.executable, str(path), json.dumps(payload)],
@@ -192,19 +262,20 @@ def generate_dedicated_sim(
     if proc.returncode == 0:
         try:
             metrics = json.loads(proc.stdout.strip().splitlines()[-1])
-            ok = (
-                "miss_reduction" in metrics
-                and 0.0 <= float(metrics["miss_reduction"]) <= 1.0
-            )
+            ok = _selftest_ok(metrics)
         except (json.JSONDecodeError, ValueError, IndexError):
             ok = False
-    # Also write a tiny SELFTEST.md
     (workdir / "DEDICATED_SIM.md").write_text(
         f"# Dedicated simulator\n\n"
         f"- family: `{params.family}`\n"
+        f"- domain: `{family_domain(params.family)}`\n"
         f"- path: `{path.name}`\n"
         f"- selftest_ok: `{ok}`\n"
-        f"- miss_reduction: `{metrics.get('miss_reduction')}`\n",
+        f"- miss_reduction: `{metrics.get('miss_reduction')}`\n"
+        f"- p99_latency: `{metrics.get('p99_latency')}`\n"
+        f"- goodput: `{metrics.get('goodput')}`\n"
+        f"- pe_utilization: `{metrics.get('pe_utilization')}`\n"
+        f"- die_to_die_bw: `{metrics.get('die_to_die_bw')}`\n",
         encoding="utf-8",
     )
     return GeneratedSim(
@@ -229,13 +300,44 @@ def _selftest_path(path: Path, payload: dict[str, Any]) -> tuple[bool, dict[str,
         return False, {}, log
     try:
         metrics = json.loads(proc.stdout.strip().splitlines()[-1])
-        ok = (
-            "miss_reduction" in metrics
-            and 0.0 <= float(metrics["miss_reduction"]) <= 1.0
-        )
+        ok = _selftest_ok(metrics)
         return ok, metrics if ok else {}, log
     except (json.JSONDecodeError, ValueError, IndexError):
         return False, {}, log
+
+
+def _llm_persona(family: str) -> str:
+    kind = family_domain(family)
+    if kind == NOC:
+        return (
+            "You write a small dedicated Python event-model simulator for a NoC "
+            "mechanism family. Return ONLY a complete dedicated_sim.py that defines "
+            "run_sim(knobs: dict) -> dict with keys p99_latency and/or goodput, "
+            "plus evidence, backend, family. Do NOT invent miss_reduction — this "
+            "is not a cache prefetcher. No network I/O. Deterministic."
+        )
+    if kind == DATAFLOW:
+        return (
+            "You write a small dedicated Python event-model simulator for a "
+            "dataflow / PE-array mechanism. Return ONLY a complete dedicated_sim.py "
+            "that defines run_sim(knobs: dict) -> dict with keys pe_utilization "
+            "(0..1) and optionally sram_traffic, plus evidence, backend, family. "
+            "Do NOT invent miss_reduction. No network I/O. Deterministic."
+        )
+    if kind == WAFER:
+        return (
+            "You write a small dedicated Python event-model simulator for a "
+            "wafer-scale fabric mechanism. Return ONLY a complete dedicated_sim.py "
+            "that defines run_sim(knobs: dict) -> dict with keys die_to_die_bw "
+            "and/or fabric_hop_latency, plus evidence, backend, family. "
+            "Do NOT invent miss_reduction. No network I/O. Deterministic."
+        )
+    return (
+        "You write a small dedicated Python event-model simulator for one cache "
+        "mechanism family. Return ONLY a complete dedicated_sim.py that defines "
+        "run_sim(knobs: dict) -> dict with keys miss_reduction, bw_delta_frac, "
+        "area_mm2, evidence, backend, family. No network I/O. Deterministic."
+    )
 
 
 async def generate_dedicated_sim_llm(
@@ -272,14 +374,11 @@ async def generate_dedicated_sim_llm(
     params = infer_params(
         title=title, mechanism=mechanism, knobs=knobs or {}, family=family
     )
-    persona = (
-        "You write a small dedicated Python event-model simulator for one cache "
-        "mechanism family. Return ONLY a complete dedicated_sim.py that defines "
-        "run_sim(knobs: dict) -> dict with keys miss_reduction, bw_delta_frac, "
-        "area_mm2, evidence, backend, family. No network I/O. Deterministic."
-    )
+    persona = _llm_persona(params.family)
+    kind = family_domain(params.family)
     ctx = (
-        f"TITLE: {title}\nFAMILY: {params.family}\nMECHANISM:\n{mechanism}\n"
+        f"TITLE: {title}\nFAMILY: {params.family}\nDOMAIN: {kind}\n"
+        f"MECHANISM:\n{mechanism}\n"
         f"KNOBS: {json.dumps(knobs or {})}\n"
         "Write dedicated_sim.py with run_sim()."
     )
@@ -300,8 +399,16 @@ async def generate_dedicated_sim_llm(
         "miss_reduction": params.base_reduction,
         "extra_bw": params.extra_bw,
         "area": params.area_mm2,
+        "family": params.family,
+        "domain": kind,
     }
     last_err = ""
+    metric_hint = (
+        "0<=miss_reduction<=1"
+        if kind == CACHE
+        else "domain keys (p99_latency/goodput or pe_utilization or "
+        "die_to_die_bw/fabric_hop_latency) — do not invent miss_reduction"
+    )
     for attempt in range(max_repairs + 1):
         if attempt == 0:
             raw = await llm.complete(persona, ctx, TaskClass.ANALYTIC)
@@ -310,8 +417,8 @@ async def generate_dedicated_sim_llm(
             repair = (
                 f"dedicated_sim.py selftest failed:\n{last_err}\n\n"
                 f"Current source:\n{path.read_text(encoding='utf-8')[:6000]}\n\n"
-                "Fix run_sim so it returns valid metrics JSON keys and "
-                "0<=miss_reduction<=1. Return full file only."
+                f"Fix run_sim so it returns valid metrics JSON keys and "
+                f"{metric_hint}. Return full file only."
             )
             raw = await llm.complete(persona, repair, TaskClass.ANALYTIC)
             code = _extract(raw)
@@ -331,9 +438,13 @@ async def generate_dedicated_sim_llm(
             (workdir / "DEDICATED_SIM.md").write_text(
                 f"# Dedicated simulator (LLM)\n\n"
                 f"- family: `{params.family}`\n"
+                f"- domain: `{kind}`\n"
                 f"- attempts: `{attempt + 1}`\n"
                 f"- selftest_ok: `True`\n"
-                f"- miss_reduction: `{metrics.get('miss_reduction')}`\n",
+                f"- miss_reduction: `{metrics.get('miss_reduction')}`\n"
+                f"- p99_latency: `{metrics.get('p99_latency')}`\n"
+                f"- pe_utilization: `{metrics.get('pe_utilization')}`\n"
+                f"- die_to_die_bw: `{metrics.get('die_to_die_bw')}`\n",
                 encoding="utf-8",
             )
             return GeneratedSim(
@@ -354,4 +465,3 @@ async def generate_dedicated_sim_llm(
     )
     baseline.log = (baseline.log or "") + f"\n[llm failed → template] {last_err}"
     return baseline
-

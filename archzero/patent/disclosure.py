@@ -42,6 +42,18 @@ _METRIC_SPECS: tuple[tuple[str, str, str, str, str | None, bool], ...] = (
     ("t2_ipc_speedup", "ipc", "IPC 加速比（解析模型）", "x", None, True),
     ("t3_area_mm2", "area", "面积", "mm2", "area_budget_mm2", False),
     ("t3_magic_gap", "magic_gap", "Magic Gap（模型 vs 仿真）", "x", "max_magic_gap", False),
+    ("t3_p99_latency", "p99_latency", "P99 时延（小规模仿真）", "cycles", None, False),
+    ("t2_p99_latency", "p99_latency", "P99 时延（解析模型）", "cycles", None, False),
+    ("t3_goodput", "goodput", "有效吞吐（小规模仿真）", "frac", None, True),
+    ("t2_goodput", "goodput", "有效吞吐（解析模型）", "frac", None, True),
+    ("t3_pe_utilization", "pe_utilization", "PE 利用率（小规模仿真）", "frac", None, True),
+    ("t2_pe_utilization", "pe_utilization", "PE 利用率（解析模型）", "frac", None, True),
+    ("t3_sram_traffic", "sram_traffic", "SRAM 流量（小规模仿真）", "frac", None, False),
+    ("t2_sram_traffic", "sram_traffic", "SRAM 流量（解析模型）", "frac", None, False),
+    ("t3_fabric_hop_latency", "fabric_hop_latency", "织物跳时延（小规模仿真）", "cycles", None, False),
+    ("t2_fabric_hop_latency", "fabric_hop_latency", "织物跳时延（解析模型）", "cycles", None, False),
+    ("t3_die_to_die_bw", "die_to_die_bw", "Die-to-die 带宽（小规模仿真）", "gbps", None, True),
+    ("t2_die_to_die_bw", "die_to_die_bw", "Die-to-die 带宽（解析模型）", "gbps", None, True),
 )
 
 _DIGIT = re.compile(r"\d")
@@ -113,12 +125,16 @@ BENEFIT_PERSONA = """你为一份华为内部专利评审材料撰写「有益�
 
 
 def _fmt(kind: str, value: float) -> str:
-    if kind == "pct":
+    if kind == "pct" or kind == "frac":
         return f"{value * 100:.1f}%"
     if kind == "x":
         return f"{value:.2f}×"
     if kind == "mm2":
         return f"{value:.3f} mm²"
+    if kind == "cycles":
+        return f"{value:.0f} cyc"
+    if kind == "gbps":
+        return f"{value:.1f} GB/s"
     return f"{value:.3f}"
 
 
@@ -155,7 +171,14 @@ def collect_benefits(
     seen: set[str] = set()
     out: list[BenefitClaim] = []
 
+    _CACHE_ONLY = {"miss_reduction", "bw_delta", "ipc", "area"}
+    skip_cache = bool(
+        thresholds is not None and thresholds.domain in {"noc", "dataflow", "wafer"}
+    )
+
     for key, quantity, label, kind, thr_attr, higher_better in _METRIC_SPECS:
+        if skip_cache and quantity in _CACHE_ONLY:
+            continue
         if key not in candidate.metrics or quantity in seen:
             continue
         value = _as_float(candidate.metrics.get(key))

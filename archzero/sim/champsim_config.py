@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from archzero.sim.families import champsim_hosts, family_domain
+
 _FAMILY_MODULE = {
     "prefetch": "prefetcher",
     "replacement": "replacement",
@@ -28,6 +30,25 @@ def build_champsim_config(
 ) -> dict[str, Any]:
     """Minimal ChampSim-style JSON config reflecting mechanism intent."""
     fam = (family or knobs.get("family") or "unclassified").lower()
+    if not champsim_hosts(fam):
+        kind = family_domain(fam)
+        return {
+            "archzero_scaffold": True,
+            "inapplicable": True,
+            "executable_name": "champsim",
+            "mechanism": {
+                "title": title,
+                "family": fam,
+                "module": None,
+                "domain": kind,
+            },
+            "ooo_cpu": [],
+            "notes": (
+                f"ChampSim cannot host family={fam!r} (domain={kind}). "
+                "ChampSim is a CPU / cache simulator; this family needs the "
+                f"{kind} analytic backend, not an L2 prefetcher module."
+            ),
+        }
     module = _FAMILY_MODULE.get(fam, "ooo_cpu")
     entries = int(knobs.get("table_entries") or knobs.get("entries") or 256)
     degree = int(knobs.get("prefetch_degree") or knobs.get("degree") or 2)
@@ -97,6 +118,22 @@ def render_patch_markdown(
     config_name: str = "champsim_config.json",
 ) -> str:
     fam = (family or knobs.get("family") or "unclassified").lower()
+    if not champsim_hosts(fam):
+        kind = family_domain(fam)
+        return (
+            f"# ChampSim mechanism patch scaffold\n\n"
+            f"- **Title:** {title or '(untitled)'}\n"
+            f"- **Family:** `{fam}`\n"
+            f"- **Domain:** `{kind}`\n"
+            f"- **Inapplicable:** ChampSim cannot host this family.\n\n"
+            "ChampSim is a CPU / cache simulator. NoC, dataflow, and wafer-scale "
+            "families have no L2 prefetcher or replacement module to patch. Use the "
+            f"`{kind}` analytic backend instead of compiling ChampSim.\n\n"
+            "## Knobs\n\n"
+            "```json\n"
+            f"{json.dumps(knobs, indent=2)}\n"
+            "```\n"
+        )
     module = _FAMILY_MODULE.get(fam, "ooo_cpu")
     return (
         f"# ChampSim mechanism patch scaffold\n\n"
@@ -144,12 +181,14 @@ def write_champsim_scaffold(
     if overwrite or not config_path.exists():
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
+    inapplicable = bool(config.get("inapplicable"))
     patch_meta = {
         "family": (family or knobs.get("family") or "unclassified"),
         "module": config["mechanism"]["module"],
         "config": "champsim_config.json",
         "knobs": knobs,
         "scaffold": True,
+        "inapplicable": inapplicable,
     }
     patch_json = workdir / "champsim_patch.json"
     if overwrite or not patch_json.exists():
@@ -169,4 +208,5 @@ def write_champsim_scaffold(
         "patch_md": str(md_path),
         "family": patch_meta["family"],
         "module": patch_meta["module"],
+        "inapplicable": inapplicable,
     }

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from archzero.config import ROOT, FactoryConfig
 from archzero.report.weekly import build_report
+from archzero.sim.headlines import candidate_headlines, headlines_text
 from archzero.spec.ndf import render_problem_package
 from archzero.store.db import Store
 
@@ -117,6 +118,7 @@ def export_campaign_bundle(
             "id": c.id,
             "title": c.title,
             "family": c.family,
+            "headlines": candidate_headlines(c.metrics, family=c.family),
             "status": c.status,
             "parent_id": c.parent_id,
             "clause_refs": c.clause_refs,
@@ -145,9 +147,11 @@ def export_campaign_bundle(
             ],
         }
         index.append(entry)
+        hl = headlines_text(c.metrics, family=c.family)
         body = (
             f"# {c.title}\n\nFamily: {c.family}\nStatus: {c.status}\n\n"
-            f"{c.mechanism}\n\n## Metrics\n\n```json\n"
+            f"{c.mechanism}\n\n## Metrics\n\n"
+            f"Headlines: {hl}\n\n```json\n"
             f"{json.dumps(c.metrics, indent=2, default=str)}\n```\n"
         )
         (root / "candidates" / f"{c.id}.md").write_text(body, encoding="utf-8")

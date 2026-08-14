@@ -70,3 +70,18 @@ def test_weekly_includes_elimination(tmp_cfg, demo_problem):
     text = build_report(tmp_cfg, campaign_id=dst.id)
     assert "Failure elimination" in text
     assert "performance" in text or "kinds eliminated" in text
+
+
+def test_generate_request_grant_selftest(tmp_path):
+    g = generate_dedicated_sim(
+        tmp_path,
+        title="Request-grant arbiter",
+        mechanism="central request-grant scheduler for collectives",
+        knobs={"family": "request_grant", "domain": "noc"},
+        family="request_grant",
+    )
+    assert g.selftest_ok
+    assert g.path.exists()
+    assert g.metrics.get("p99_latency") is not None or g.metrics.get("goodput") is not None
+    assert "miss_reduction" not in g.metrics or g.metrics.get("miss_reduction") is None
+

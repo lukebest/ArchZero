@@ -14,6 +14,7 @@ from typing import Any
 
 from archzero.config import FactoryConfig, load_config
 from archzero.models import Tier, Verdict
+from archzero.sim.headlines import candidate_headlines, metrics_domain
 from archzero.store.db import Store
 
 STATIC = Path(__file__).with_name("static")
@@ -62,6 +63,8 @@ def _serialize_candidate(c) -> dict[str, Any]:
         "score": lt.score if lt else None,
         "failures": len(c.failures),
         "clause_refs": c.clause_refs,
+        "headlines": candidate_headlines(metrics, family=c.family),
+        "metrics_domain": metrics_domain(metrics, c.family),
     }
 
 

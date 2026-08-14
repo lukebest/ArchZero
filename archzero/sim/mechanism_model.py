@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from archzero.analytic.core import magic_gap
+from archzero.sim.families import DATAFLOW, NOC, WAFER, family_domain
 from archzero.sim.metrics import SimMetrics
 
 
@@ -38,9 +39,34 @@ _FAMILY_HINTS = (
 )
 
 
-def infer_family(title: str, mechanism: str, explicit: str | None = None) -> str:
-    if explicit:
-        return explicit.lower().strip()
+def infer_family(
+    title: str,
+    mechanism: str,
+    explicit: str | None = None,
+    domain: str | None = None,
+) -> str:
+    """Resolve a mechanism family.
+
+    Off-cache domains (and known off-cache family ids) do not fall through to
+    the prefetch / streamer substring table — ``stream`` in a collective
+    description is not an L2 streamer.
+    """
+    hinted = (explicit or "").strip().lower() or None
+    kind = domain or (family_domain(hinted) if hinted else None)
+    if kind == NOC:
+        from archzero.sim.noc import infer_noc_family
+
+        return infer_noc_family(title, mechanism, hinted)
+    if kind == DATAFLOW:
+        from archzero.sim.dataflow import infer_dataflow_family
+
+        return infer_dataflow_family(title, mechanism, hinted)
+    if kind == WAFER:
+        from archzero.sim.wafer import infer_wafer_family
+
+        return infer_wafer_family(title, mechanism, hinted)
+    if hinted:
+        return hinted
     blob = f"{title} {mechanism}".lower()
     for family, keys in _FAMILY_HINTS:
         if any(k in blob for k in keys):
@@ -56,7 +82,12 @@ def infer_params(
     family: str | None = None,
 ) -> MechanismParams:
     knobs = knobs or {}
-    fam = infer_family(title, mechanism, family or knobs.get("family"))
+    fam = infer_family(
+        title,
+        mechanism,
+        family or knobs.get("family"),
+        domain=knobs.get("domain"),
+    )
     # Pull integers from mechanism text when present
     entries = _int_near(mechanism, r"(\d+)\s*(?:entry|entries)", 256)
     hist = _int_near(mechanism, r"history[^\d]{0,12}(\d+)", 8)
@@ -90,7 +121,62 @@ def simulate_mechanism(
     candidate_id: str = "anon",
     suite: str = "small",
 ) -> SimMetrics:
-    """Family-specific event-model proxies (deterministic per candidate+suite)."""
+    """Family-specific event-model proxies (deterministic per candidate+suite).
+
+    Off-cache families delegate to the analytic domain backends instead of
+    inventing an MPKI reduction.
+    """
+    kind = family_domain(params.family)
+    if kind == NOC:
+        from archzero.sim.noc import infer_noc_family, run_matrix
+
+        fam = infer_noc_family("", "", params.family)
+        agg = run_matrix(family_id=fam, suite=suite)["aggregate"]
+        return SimMetrics(
+            evidence="directed",
+            backend="directed",
+            suite=suite,
+            domain=NOC,
+            completion_latency=agg["completion_latency"],
+            p95_latency=agg["p95_latency"],
+            p99_latency=agg["p99_latency"],
+            goodput=agg["goodput"],
+            link_utilization=agg["link_utilization"],
+            note=f"mechanism event-model family={fam} (analytic NoC, not ChampSim)",
+            extra={"family": fam},
+        )
+    if kind == DATAFLOW:
+        from archzero.sim.dataflow import infer_dataflow_family, run_matrix
+
+        fam = infer_dataflow_family("", "", params.family)
+        agg = run_matrix(family_id=fam, suite=suite)["aggregate"]
+        return SimMetrics(
+            evidence="directed",
+            backend="directed",
+            suite=suite,
+            domain=DATAFLOW,
+            pe_utilization=agg["pe_utilization"],
+            reuse_factor=agg["reuse_factor"],
+            sram_traffic=agg["sram_traffic"],
+            note=f"mechanism event-model family={fam} (analytic dataflow, not ChampSim)",
+            extra={"family": fam},
+        )
+    if kind == WAFER:
+        from archzero.sim.wafer import infer_wafer_family, run_matrix
+
+        fam = infer_wafer_family("", "", params.family)
+        agg = run_matrix(family_id=fam)["aggregate"]
+        return SimMetrics(
+            evidence="directed",
+            backend="directed",
+            suite=suite,
+            domain=WAFER,
+            fabric_hop_latency=agg["fabric_hop_latency"],
+            die_to_die_bw=agg["die_to_die_bw"],
+            note=f"mechanism event-model family={fam} (analytic wafer, not ChampSim)",
+            extra={"family": fam},
+        )
+
     seed = int(
         hashlib.sha256(f"{candidate_id}:{suite}:{params.family}".encode()).hexdigest()[:8],
         16,

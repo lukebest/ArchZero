@@ -35,6 +35,28 @@ async def evaluate_tier5(
     work.mkdir(parents=True, exist_ok=True)
     candidate.workdir = str(work)
 
+    from archzero.spec.acc_parse import parse_acceptance_thresholds
+
+    th = parse_acceptance_thresholds(problem)
+    if th.domain not in {"cache", "generic"}:
+        result = TierResult(
+            tier=Tier.T5,
+            verdict=Verdict.UNAVAILABLE,
+            score=0.0,
+            summary=(
+                f"Tier5: RTL baseline {cfg.rtl.baseline_design} is a cache design; "
+                f"domain={th.domain} has no RTL baseline — not evaluating an interconnect "
+                f"or PE-array study against coupled_l2"
+            ),
+            evidence=EvidenceLevel.RTL,
+            metrics={"rtl": "inapplicable", "domain": th.domain, "baseline": cfg.rtl.baseline_design},
+            clause_refs=candidate.clause_refs,
+        )
+        apply_llm_provenance(result, llm)
+        candidate.tier_history.append(result)
+        candidate.status = "active"
+        return candidate
+
     ensure_baseline_link(cfg, work)
     digest = api_digest(cfg)
     instruction = (

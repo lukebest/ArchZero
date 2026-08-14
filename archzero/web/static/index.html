@@ -759,8 +759,29 @@ async function runCompare() {
     <table class="cmp">
       <thead><tr><th>原因</th><th>A</th><th>B</th><th>Δ</th></tr></thead>
       <tbody>${fails || '<tr><td colspan="4">无失败差异</td></tr>'}</tbody>
-    </table>`;
+    </table>
+    ${survivorHeadlinesHtml(data)}`;
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function survivorHeadlinesHtml(data) {
+  const a = (data.a && data.a.survivors_detail) || [];
+  const b = (data.b && data.b.survivors_detail) || [];
+  if (!a.length && !b.length) return "";
+  const side = (rows, label) => {
+    if (!rows.length) return "";
+    const items = rows.map(c => `
+      <div class="sub" style="margin:0.25rem 0">
+        <span class="badge">${escapeHtml(c.family || "unclassified")}</span>
+        ${(c.headlines || []).map(h => `<span class="badge">${escapeHtml(h.label)} ${escapeHtml(h.display)}</span>`).join("")}
+        <span class="mono">${escapeHtml(c.title || c.id || "")}</span>
+      </div>`).join("");
+    return `<div class="hint" style="margin-top:0.5rem"><strong>${label}</strong></div>${items}`;
+  };
+  return `
+    <div class="panel-hd" style="margin-top:1rem"><h2>Headlines</h2></div>
+    ${side(a, "A")}
+    ${side(b, "B")}`;
 }
 
 function renderSummary(data) {
@@ -928,6 +949,7 @@ function renderCandidates() {
         <span class="badge">${escapeHtml(c.family || "unclassified")}</span>
         <span class="badge info">${escapeHtml(tierName)}</span>
         ${c.score != null ? `<span class="badge">分 ${escapeHtml(String(c.score))}</span>` : ""}
+        ${(c.headlines || []).map(h => `<span class="badge">${escapeHtml(h.label)} ${escapeHtml(h.display)}</span>`).join("")}
         ${c.failures ? `<span class="badge bad">${c.failures} 条失败</span>` : ""}
         <span class="mono">${escapeHtml(shortId(c.id))}</span>
       </div>
@@ -999,6 +1021,7 @@ async function showCandidate(id) {
     </p>
     <div class="hint">分层裁决时间线（从早到晚）</div>
     <div class="timeline">${history}</div>
+    ${(c.headlines && c.headlines.length) ? `<div class="hint">测量数字</div><div class="sub">${c.headlines.map(h => `<span class="badge">${escapeHtml(h.label)} ${escapeHtml(h.display)}</span>`).join("")}</div>` : ""}
     ${fails ? `<div class="hint">失败明细</div><ul style="margin:0.2rem 0 0.6rem;padding-left:1.2rem;font-size:0.88rem;line-height:1.5">${fails}</ul>` : ""}
     <div class="panel-hd" style="margin-top:0.4rem">
       <div class="hint" style="margin:0">方案 / 机制说明</div>

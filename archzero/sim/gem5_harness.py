@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from archzero.sim.families import CACHE, family_domain
+
 _HARNESS = '''\
 """ArchZero gem5 harness scaffold — replace with a real SE/FS script.
 
@@ -50,12 +52,26 @@ ipc = 1.5 * (1.0 + 0.2 * reduction)
 print(f"archzero gem5 harness scaffold wrote stats (reduction={reduction})")
 '''
 
+_HARNESS_INAPPLICABLE = '''\
+"""ArchZero gem5 harness — inapplicable for this domain.
+
+gem5 SE/FS is a CPU/cache driver. Use the domain analytic backend instead.
+This script does not emit CPU or L2 placeholder stats.
+"""
+
+from __future__ import annotations
+
+print("archzero gem5 harness inapplicable")
+'''
+
 
 def write_gem5_harness(
     workdir: Path,
     *,
     knobs: dict[str, Any] | None = None,
     overwrite: bool = False,
+    family: str | None = None,
+    domain: str | None = None,
 ) -> dict[str, Any]:
     """Write run_gem5.py (+ ensure sim_knobs.json) under workdir."""
     workdir = Path(workdir)
@@ -64,12 +80,36 @@ def write_gem5_harness(
         kp = workdir / "sim_knobs.json"
         if overwrite or not kp.exists():
             kp.write_text(json.dumps(knobs, indent=2) + "\n", encoding="utf-8")
+    fam = family or (knobs or {}).get("family")
+    kind = (domain or "").strip().lower()
+    off_cache = kind in {"noc", "dataflow", "wafer"} or family_domain(fam) != CACHE
     script = workdir / "run_gem5.py"
     created = False
+    md = workdir / "GEM5_HARNESS.md"
+    if off_cache:
+        resolved = kind if kind in {"noc", "dataflow", "wafer"} else family_domain(fam)
+        if overwrite or not script.exists():
+            script.write_text(_HARNESS_INAPPLICABLE, encoding="utf-8")
+            created = True
+        if overwrite or not md.exists():
+            md.write_text(
+                "# gem5 harness — inapplicable\n\n"
+                "gem5 SE/FS is a CPU/cache driver. This candidate's domain is "
+                f"`{resolved}`.\n"
+                f"Use the `{resolved}` analytic backend instead of writing L2 "
+                "miss_rate / IPC placeholder stats.\n",
+                encoding="utf-8",
+            )
+        return {
+            "ok": True,
+            "path": str(script),
+            "created": created,
+            "doc": str(md),
+            "inapplicable": True,
+        }
     if overwrite or not script.exists():
         script.write_text(_HARNESS, encoding="utf-8")
         created = True
-    md = workdir / "GEM5_HARNESS.md"
     if overwrite or not md.exists():
         md.write_text(
             "# gem5 harness scaffold\n\n"
