@@ -309,15 +309,164 @@ def seed_noc_report_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict
     }
 
 
-def seed_acc_refusal_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict:
-    """Seed a wafer-scale campaign the funnel still refuses to grade past Tier1.
 
-    NoC is now measurable. The honesty demo moved to a domain that still has
-    no evaluator, so a new user can see both: numbers for interconnect, and
-    an explicit refusal for wafer-scale fabric metrics.
+DATAFLOW_MECHANISMS = [
+    (
+        "Output-stationary GEMM mapper with square-tile preference",
+        "os",
+        "Keep C stationary on the PE array; stream A and B. Favours square GEMM "
+        "and reports PE utilisation against SRAM traffic.",
+    ),
+    (
+        "Weight-stationary mapper for skinny-N layers",
+        "ws",
+        "Keep B stationary; stream M. Better reuse when N is wide and M is small.",
+    ),
+    (
+        "Row-stationary mapper with RF-resident rows",
+        "rs",
+        "Eyeriss-style row mapping: keep a row in RF, tax occupancy on a 16×16 array.",
+    ),
+]
+
+
+def seed_dataflow_report_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict:
+    """Seed a dataflow campaign the analytic backend can measure but not adjudicate.
+
+    The scaffolded spec asks for PE utilisation / SRAM traffic and never pins a
+    numeric gate, so Tier2/Tier3 report numbers and stay report-only.
     """
     from archzero.funnel.pipeline import acc_gate_for_campaign
+    from archzero.sim.backend import SimRequest
+    from archzero.sim.dataflow import DataflowAnalyticBackend
     from archzero.spec.wizard import scaffold_problem
+
+    cfg.ensure_dirs()
+    store = Store(cfg.db_path)
+
+    existing = [c for c in store.list_campaigns() if c.meta.get("demo_dataflow_report")]
+    if existing and not force:
+        return {
+            "campaign_id": existing[0].id,
+            "created": False,
+            "n_candidates": len(store.list_candidates(campaign_id=existing[0].id)),
+            "note": "dataflow report demo already exists; pass force=True to add another",
+        }
+
+    spec_dir = cfg.state_dir / "demo_specs"
+    path = scaffold_problem(
+        title="PE-array dataflow mapping",
+        workload="GEMM layers on a 16x16 PE array",
+        symptom="PE idle cycles and excess SRAM traffic on skinny layers",
+        constraint="iso-resource 16x16 PE, 256 KiB SRAM",
+        domain="dataflow",
+        out_dir=spec_dir,
+    )
+    pp = load_problem_package(path)
+    store.save_problem(pp)
+
+    through, acc_meta = acc_gate_for_campaign(cfg, pp, Tier.T4)
+    th = parse_acceptance_thresholds(pp)
+    backend = DataflowAnalyticBackend(cfg)
+
+    camp = Campaign(
+        name="Dataflow PE mapping (offline seed · report-only)",
+        problem_id=pp.id,
+        through_tier=through,
+        status="done",
+        meta={"demo": True, "offline": True, "demo_dataflow_report": True, "acc": acc_meta},
+    )
+    store.save_campaign(camp)
+
+    for title, family, mechanism in DATAFLOW_MECHANISMS:
+        cand = Candidate(
+            problem_id=pp.id,
+            title=title,
+            mechanism=mechanism,
+            family=family,
+            clause_refs=["REQ-001", "ACC-001", "ACC-002"],
+            status="active",
+            metrics={"demo": True},
+        )
+        work = cfg.scratch_dir / "demo-dataflow" / cand.id
+        work.mkdir(parents=True, exist_ok=True)
+        cand.workdir = str(work)
+        sim = backend.run(
+            SimRequest(
+                candidate_id=cand.id,
+                workdir=work,
+                patch_hint=mechanism,
+                suite="small",
+                meta={"title": title, "mechanism": mechanism, "family": family},
+            )
+        )
+        cand.metrics.update({f"t3_{k}": v for k, v in sim.metrics.items()})
+        pe = sim.metrics.get("pe_utilization")
+        reuse = sim.metrics.get("reuse_factor")
+        cand.tier_history.append(
+            TierResult(
+                tier=Tier.T0,
+                verdict=Verdict.PASS,
+                score=0.85,
+                summary="Tier0 hard screen: no conservation violation in the stated PE/SRAM budget",
+                clause_refs=cand.clause_refs,
+            )
+        )
+        cand.tier_history.append(
+            TierResult(
+                tier=Tier.T1,
+                verdict=Verdict.PASS,
+                score=0.7,
+                summary="Tier1 adversarial review: iso-resource comparison protocol respected",
+                clause_refs=cand.clause_refs,
+            )
+        )
+        cand.tier_history.append(
+            TierResult(
+                tier=Tier.T2,
+                verdict=Verdict.PASS,
+                score=float(pe or 0.0),
+                summary=(
+                    f"Tier2 report-only：可测 {', '.join(th.measurable_performance)}，"
+                    f"规范未给出数值门限，不裁决 PASS/FAIL"
+                ),
+                metrics={"thresholds": th.as_dict(), "acc_gradable": True, "report_only": True},
+                clause_refs=cand.clause_refs,
+            )
+        )
+        cand.tier_history.append(
+            TierResult(
+                tier=Tier.T3,
+                verdict=Verdict.PASS,
+                score=float(pe or 0.0),
+                summary=(
+                    f"dataflow analytic: pe_util={float(pe or 0):.2f} "
+                    f"reuse={float(reuse or 0):.2f} report-only"
+                ),
+                metrics={**sim.metrics, "adjudicated": False},
+                clause_refs=cand.clause_refs,
+            )
+        )
+        store.save_candidate(cand, campaign_id=camp.id)
+
+    return {
+        "campaign_id": camp.id,
+        "created": True,
+        "n_candidates": len(DATAFLOW_MECHANISMS),
+        "problem_id": pp.id,
+        "through": through.value,
+    }
+
+
+def seed_acc_refusal_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict:
+    """Seed a yield/thermal wafer campaign the funnel still refuses past Tier1.
+
+    Hop latency and die-to-die bandwidth are now measurable (report-only).
+    The honesty demo uses a package whose ACC names only yield, redundancy,
+    thermal density, and power density — quantities no evaluator produces.
+    """
+    from archzero.funnel.pipeline import acc_gate_for_campaign
+    from archzero.spec.wizard import scaffold_unmeasurable_probe
 
     cfg.ensure_dirs()
     store = Store(cfg.db_path)
@@ -332,12 +481,8 @@ def seed_acc_refusal_campaign(cfg: FactoryConfig, *, force: bool = False) -> dic
         }
 
     spec_dir = cfg.state_dir / "demo_specs"
-    path = scaffold_problem(
-        title="WSE fabric partition latency",
-        workload="tensor-parallel LLM on SRAM-resident wafer",
-        symptom="collectives stall on die-boundary hops",
-        constraint="no off-wafer DRAM; power-density cap",
-        domain="wafer",
+    path = scaffold_unmeasurable_probe(
+        title="WSE yield and thermal density",
         out_dir=spec_dir,
     )
     pp = load_problem_package(path)
@@ -360,7 +505,8 @@ def seed_acc_refusal_campaign(cfg: FactoryConfig, *, force: bool = False) -> dic
         title="Spare-die bypass with compiled collective schedule",
         mechanism=(
             "Route around defective dies using precomputed slot tables; "
-            "recompute on isolation. Targets hop latency under a redundancy budget."
+            "recompute on isolation. Targets yield under a redundancy and "
+            "power-density budget."
         ),
         family="wse_fabric",
         clause_refs=["REQ-001", "ACC-001"],

@@ -60,10 +60,10 @@ def acc_gate_for_campaign(
 ) -> tuple[Tier, dict[str, Any]]:
     """How far can the numeric tiers honestly grade this problem package?
 
-    Tier0/Tier1 read clause text and stay useful in any domain. Tier2+ gate on
-    four cache numbers, so a spec whose acceptance criteria live outside that
-    vocabulary gets clamped to Tier1 rather than spending a few hundred LLM
-    calls on its way to a verdict that would have been about MPKI.
+    Tier0/Tier1 read clause text and stay useful in any domain. Tier2+ only
+    grades metrics this repo can measure. A spec whose acceptance criteria
+    have no evaluator is clamped to Tier1 rather than spending a few hundred
+    LLM calls on a verdict that would have been about MPKI.
     """
     th = parse_acceptance_thresholds(problem)
     from archzero.sim.registry import backend_name_for_domain

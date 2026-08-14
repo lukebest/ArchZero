@@ -39,6 +39,15 @@ archzero = "archzero.cli:app"
 # Builtins register in-process. Third-party packages add factories here:
 #   my_noc = "mypkg.backends:build_noc"
 
+[project.entry-points."archzero.rtl_backends"]
+#   my_rtl = "mypkg.rtl:build"
+
+[project.entry-points."archzero.sign_backends"]
+#   my_sign = "mypkg.sign:build"
+
+[project.entry-points."archzero.evolve_backends"]
+#   my_evolve = "mypkg.evolve:build"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -33,15 +33,109 @@ from archzero.store.artifacts import ArtifactStore
 SPEC_PERSONA = """You write analytic performance specifications for architecture mechanisms.
 Return markdown SPEC with: Assumptions, Equations, Parameters, Predicted metrics, Falsifiers."""
 
-CODE_PERSONA = """You implement a Python analytic model for an architecture mechanism.
+CODE_PERSONA_CACHE = """You implement a Python analytic model for a cache / memory-hierarchy mechanism.
 Write a complete model.py that:
 - may import from archzero.analytic.core import *
 - defines run_model() -> dict with keys predicted_mpki, miss_reduction, ipc_speedup, meets_target
 - is deterministic and has no network I/O
 Return ONLY the Python source."""
 
+CODE_PERSONA_NOC = """You implement a Python analytic model for an on-chip interconnect / collective mechanism.
+Write a complete model.py that:
+- SHOULD import from archzero.analytic.domains import noc_model
+- defines run_model() -> dict by calling noc_model("<family>")
+  family is one of: packet_switched, request_grant, push_on_pull, presched
+- returned keys MUST include completion_latency, p95_latency, p99_latency, goodput, link_utilization
+- do NOT invent predicted_mpki, miss_reduction, or ipc_speedup — those are cache metrics
+- meets_target must be None unless the spec stated a numeric gate
+- is deterministic and has no network I/O
+Return ONLY the Python source."""
+
+CODE_PERSONA_DATAFLOW = """You implement a Python analytic model for a spatial-accelerator / dataflow mechanism.
+Write a complete model.py that:
+- SHOULD import from archzero.analytic.domains import dataflow_model
+- defines run_model() -> dict by calling dataflow_model("<family>")
+  family is one of: output_stationary, weight_stationary, input_stationary, row_stationary
+- returned keys MUST include pe_utilization, reuse_factor, sram_traffic
+- do NOT invent predicted_mpki, miss_reduction, or ipc_speedup — those are cache metrics
+- meets_target must be None unless the spec stated a numeric gate
+- is deterministic and has no network I/O
+Return ONLY the Python source."""
+
+CODE_PERSONA_WAFER = """You implement a Python analytic model for a wafer-scale / multi-die fabric mechanism.
+Write a complete model.py that:
+- SHOULD import from archzero.analytic.domains import wafer_model
+- defines run_model() -> dict by calling wafer_model("<family>")
+  family is one of: mesh_xy, spare_bypass, compiled_partition
+- returned keys MUST include fabric_hop_latency, die_to_die_bw
+- do NOT invent predicted_mpki, miss_reduction, or ipc_speedup — those are cache metrics
+- do NOT invent yield_redundancy or thermal_density — this backend does not measure them
+- meets_target must be None unless the spec stated a numeric gate
+- is deterministic and has no network I/O
+Return ONLY the Python source."""
+
+CODE_PERSONA_GENERIC = """You implement a Python analytic model for an architecture mechanism.
+Write a complete model.py that:
+- may import from archzero.analytic.core import * or archzero.analytic.domains
+- defines run_model() -> dict whose keys match the problem's declared metrics
+- do not invent cache MPKI numbers unless the spec is about a cache
+- is deterministic and has no network I/O
+Return ONLY the Python source."""
+
+# Back-compat alias: cache tests and FakeLLM paths still import CODE_PERSONA.
+CODE_PERSONA = CODE_PERSONA_CACHE
+
 INSIGHT_PERSONA = """You interpret analytic model results vs problem acceptance criteria.
-Return JSON: {verdict: pass|fail, score:0-1, summary, magic_gap_notes, clause_refs:[]}"""
+Return JSON: {verdict: pass|fail, score:0-1, summary, magic_gap_notes, clause_refs:[]}
+If the thresholds mark report_only, do not invent a numeric pass/fail; summarise the measured numbers."""
+
+_CACHE_METRIC_KEYS = ("predicted_mpki", "miss_reduction", "ipc_speedup")
+_DOMAIN_HEADLINE = {
+    "noc": ("p99_latency", "goodput", "completion_latency"),
+    "dataflow": ("pe_utilization", "reuse_factor", "sram_traffic"),
+    "wafer": ("die_to_die_bw", "fabric_hop_latency"),
+    "cache": ("miss_reduction", "predicted_mpki", "ipc_speedup"),
+}
+
+
+def code_persona_for(domain: str) -> str:
+    if domain == "noc":
+        return CODE_PERSONA_NOC
+    if domain == "dataflow":
+        return CODE_PERSONA_DATAFLOW
+    if domain == "wafer":
+        return CODE_PERSONA_WAFER
+    if domain == "cache":
+        return CODE_PERSONA_CACHE
+    return CODE_PERSONA_GENERIC
+
+
+def _headline_score(metrics: dict, th: AcceptanceThresholds) -> float:
+    for key in _DOMAIN_HEADLINE.get(th.domain, ("miss_reduction",)):
+        val = metrics.get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+    return float(metrics.get("miss_reduction") or 0.0)
+
+
+def _sanitize_domain_metrics(
+    metrics: dict, th: AcceptanceThresholds, *, strict: bool
+) -> dict:
+    """Drop leaked cache keys on off-domain specs when strict_acc is on."""
+    out = dict(metrics)
+    if not strict or th.domain in ("cache", "generic"):
+        return out
+    leaked = [k for k in _CACHE_METRIC_KEYS if k in out]
+    if leaked:
+        out["_stripped_cache_keys"] = leaked
+        for k in leaked:
+            out.pop(k, None)
+    if th.report_only:
+        out["meets_target"] = None
+    return out
 
 
 def _extract_code(text: str) -> str:
@@ -141,6 +235,7 @@ async def _run_single_tier2_attempt(
         arts.put_text(spec_text, suffix=".md")
 
     # Phase 2: code + repair loop
+    persona = code_persona_for(th.domain)
     code_ctx = base + f"\n\nSPECIFICATION:\n{spec_text}\n"
     model_path = run_dir / "model.py"
     metrics: dict | None = None
@@ -148,7 +243,7 @@ async def _run_single_tier2_attempt(
     for attempt in range(max_repairs):
         if attempt == 0:
             raw = await llm.work(
-                CODE_PERSONA,
+                persona,
                 code_ctx + "\nWrite model.py implementing run_model().",
                 TaskClass.ANALYTIC,
                 cwd=run_dir,
@@ -158,9 +253,10 @@ async def _run_single_tier2_attempt(
         else:
             repair = (
                 f"model.py failed:\n{err}\n\nFix model.py so run_model() works. "
-                f"You may use archzero.analytic.core helpers."
+                f"Use the domain helpers named in the system persona; "
+                f"do not invent cache MPKI numbers for a {th.domain} problem."
             )
-            await llm.work(CODE_PERSONA, repair, TaskClass.ANALYTIC, cwd=run_dir)
+            await llm.work(persona, repair, TaskClass.ANALYTIC, cwd=run_dir)
         metrics, err = run_model_sandboxed(
             model_path,
             timeout_s=cfg.funnel.model_exec_timeout_s,
@@ -180,6 +276,29 @@ async def _run_single_tier2_attempt(
             score=0.0,
             summary=f"analytic model failed after repairs: {err}",
             metrics={"error": err},
+            insight={},
+            thresholds=th.as_dict(),
+        )
+
+    metrics = _sanitize_domain_metrics(
+        metrics, th, strict=cfg.funnel.strict_acc
+    )
+    needed = _DOMAIN_HEADLINE.get(th.domain)
+    if (
+        cfg.funnel.strict_acc
+        and needed
+        and th.domain not in ("cache", "generic")
+        and not any(metrics.get(k) is not None for k in needed)
+    ):
+        return Tier2RunResult(
+            verdict=Verdict.FAIL,
+            score=0.0,
+            summary=(
+                f"analytic model emitted no {th.domain} metrics "
+                f"({', '.join(needed)}); "
+                f"stripped cache keys={metrics.get('_stripped_cache_keys')}"
+            ),
+            metrics={"model": metrics},
             insight={},
             thresholds=th.as_dict(),
         )
@@ -205,7 +324,7 @@ async def _run_single_tier2_attempt(
             failed = [v.name for v in verifiers if not v.ok]
             return Tier2RunResult(
                 verdict=Verdict.FAIL,
-                score=float(metrics.get("miss_reduction") or 0),
+                score=_headline_score(metrics, th),
                 summary=f"verifier FAIL: {', '.join(failed)}",
                 metrics={"model": metrics, "verifiers": [v.name for v in verifiers]},
                 insight={},
@@ -218,7 +337,7 @@ async def _run_single_tier2_attempt(
     if not acc_ok:
         return Tier2RunResult(
             verdict=Verdict.FAIL,
-            score=float(metrics.get("miss_reduction") or 0),
+            score=_headline_score(metrics, th),
             summary=acc_note,
             metrics={"model": metrics},
             insight={},
@@ -244,7 +363,7 @@ async def _run_single_tier2_attempt(
         data = {
             "verdict": "fail",
             "summary": f"insight error (fail-closed): {exc}",
-            "score": float(metrics.get("miss_reduction") or 0),
+            "score": _headline_score(metrics, th),
         }
 
     insight_pass = str(data.get("verdict", "")).lower() == "pass"
@@ -273,7 +392,7 @@ async def _run_single_tier2_attempt(
 
     return Tier2RunResult(
         verdict=verdict,
-        score=float(data.get("score") or metrics.get("miss_reduction") or 0.0),
+        score=float(data.get("score") or _headline_score(metrics, th)),
         summary=str(data.get("summary") or ""),
         metrics={"model": metrics},
         insight=data,

@@ -11,7 +11,7 @@ def lint_acceptance(pp: ProblemPackage) -> list[str]:
     """Flag acceptance criteria the funnel cannot honestly grade.
 
     A spec can be perfectly well-formed NDF and still be ungradable, because
-    the numeric tiers only understand four cache quantities. Saying so at lint
+    a declared metric may have no evaluator in this repo. Saying so at lint
     time is much cheaper than discovering it after a few hundred LLM calls.
     """
     th = parse_acceptance_thresholds(pp)

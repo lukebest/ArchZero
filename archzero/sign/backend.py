@@ -58,7 +58,6 @@ class NullSignBackend(SignBackend):
 
 
 def get_sign_backend(cfg: FactoryConfig) -> SignBackend:
-    if not cfg.sign.enabled:
-        return NullSignBackend()
-    # Future: return YosysOpenroadBackend(cfg)
-    return NullSignBackend()
+    from archzero.sign.registry import resolve_sign_backend
+
+    return resolve_sign_backend(cfg)

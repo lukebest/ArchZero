@@ -101,11 +101,27 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
             severity=sim_sev,
         )
     )
+    from archzero.evolve.registry import registered_evolve_backends
+    from archzero.rtl.registry import registered_rtl_backends
+    from archzero.sign.registry import registered_sign_backends
+
     checks.append(
         Check(
             name="sim registry",
             ok=True,
             detail="registered: " + ", ".join(registered_backends()),
+            severity="info",
+        )
+    )
+    checks.append(
+        Check(
+            name="rtl / sign / evolve registries",
+            ok=True,
+            detail=(
+                f"rtl={', '.join(registered_rtl_backends())}; "
+                f"sign={', '.join(registered_sign_backends())}; "
+                f"evolve={', '.join(registered_evolve_backends())}"
+            ),
             severity="info",
         )
     )

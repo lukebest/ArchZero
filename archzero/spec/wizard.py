@@ -239,3 +239,109 @@ def scaffold_problem(
     path = out_dir / f"{_slug(title)}.md"
     write_problem_package(pp, path)
     return path
+
+def scaffold_unmeasurable_probe(
+    *,
+    title: str = "WSE yield and thermal probe",
+    out_dir: Path,
+) -> Path:
+    """Write a wafer-domain package whose ACC names only unmeasurable quantities.
+
+    After the default wafer template became report-only (hop latency and
+    die-to-die bandwidth now have an evaluator), the honesty demo needs a
+    package that still cannot be graded: yield, redundancy, thermal density,
+    and power density. ACC/REQ must not mention hop latency or die-to-die
+    bandwidth.
+    """
+    pid = f"pp-{_slug(title)}"
+    clauses = [
+        Clause(
+            id="CTX-001",
+            kind=ClauseKind.CONTEXT,
+            text=(
+                "Workload: tensor-parallel LLM on SRAM-resident wafer.\n\n"
+                "Symptom: defective dies and hot spots collapse usable fabric."
+            ),
+        ),
+        Clause(
+            id="CTX-002",
+            kind=ClauseKind.CONTEXT,
+            text=(
+                "Hardware / resource envelope: no off-wafer DRAM; "
+                "power-density cap and spare-die redundancy budget are fixed."
+            ),
+            refines=["CTX-001"],
+        ),
+        Clause(
+            id="REQ-001",
+            kind=ClauseKind.REQUIREMENT,
+            text=(
+                "The mechanism shall improve yield / redundancy overhead "
+                "and keep thermal density / power density under the envelope."
+            ),
+            refines=["CTX-001"],
+        ),
+        Clause(
+            id="REQ-002",
+            kind=ClauseKind.REQUIREMENT,
+            text=(
+                "Candidate mechanisms must not exceed the power-density cap "
+                "or the redundancy budget; yield and thermal density must be "
+                "reported together."
+            ),
+            refines=["CTX-002"],
+        ),
+        Clause(
+            id="NNG-001",
+            kind=ClauseKind.NON_GOAL,
+            text=(
+                "Do not perform full-package thermal simulation or change "
+                "the wafer process."
+            ),
+        ),
+        Clause(
+            id="ACC-001",
+            kind=ClauseKind.ACCEPTANCE,
+            text=(
+                "An analytic model shall report yield / redundancy overhead "
+                "under a stated defect map; do not substitute an unrelated "
+                "cache miss metric for yield."
+            ),
+            refines=["REQ-001"],
+            measurable=True,
+        ),
+        Clause(
+            id="ACC-002",
+            kind=ClauseKind.ACCEPTANCE,
+            text=(
+                "Simulation shall report thermal density and power density "
+                "under at least one defect-injection scenario, versus a "
+                "no-redundancy baseline."
+            ),
+            refines=["REQ-001", "REQ-002"],
+            measurable=True,
+        ),
+        Clause(
+            id="DOF-001",
+            kind=ClauseKind.DEGREE_OF_FREEDOM,
+            text=(
+                "Open degrees of freedom: spare-die placement, "
+                "redundancy granularity."
+            ),
+        ),
+    ]
+    pp = ProblemPackage(
+        id=pid,
+        title=title,
+        clauses=clauses,
+        open_questions=[
+            "What mechanisms improve yield without raising thermal density?",
+            "How does the defect map change the spare-die budget?",
+        ],
+        meta={"domain": WAFER, "scaffolded": True, "unmeasurable_probe": True},
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{_slug(title)}.md"
+    write_problem_package(pp, path)
+    return path
+

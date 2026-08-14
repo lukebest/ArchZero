@@ -16,7 +16,7 @@ from archzero.sim.registry import (
 
 def test_builtins_are_registered():
     names = registered_backends()
-    for required in ("stub", "directed", "champsim", "gem5", "noc"):
+    for required in ("stub", "directed", "champsim", "gem5", "noc", "dataflow", "wafer"):
         assert required in names
 
 
@@ -43,6 +43,12 @@ def test_domain_routes_cache_backends_to_noc():
     resolved, reason = backend_name_for_domain("champsim", "cache")
     assert resolved == "champsim"
     assert reason is None
+    resolved, reason = backend_name_for_domain("champsim", "dataflow")
+    assert resolved == "dataflow"
+    assert reason is not None
+    resolved, reason = backend_name_for_domain("champsim", "wafer")
+    assert resolved == "wafer"
+    assert reason is not None
 
 
 def test_plugin_can_register_and_unregister(tmp_cfg):

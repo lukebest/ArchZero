@@ -28,7 +28,7 @@ from archzero.spec.metrics import (
     metrics_for_domain,
 )
 from archzero.spec.ndf import load_problem_package
-from archzero.spec.wizard import TEMPLATES, scaffold_problem
+from archzero.spec.wizard import TEMPLATES, scaffold_problem, scaffold_unmeasurable_probe
 
 SPECS = ROOT / "specs"
 
@@ -74,6 +74,8 @@ def test_alias_matching_is_word_boundary_aware():
 def test_infer_domain_from_clause_text():
     assert infer_domain("report p99 completion latency and goodput vs baseline") == "noc"
     assert infer_domain("predicted MPKI reduction with DRAM bandwidth held flat") == "cache"
+    assert infer_domain("PE utilization and data reuse under iso-resource SRAM") == "dataflow"
+    assert infer_domain("report hop latency and die-to-die bandwidth") == "wafer"
     assert infer_domain("no metrics named here at all") == "generic"
 
 
@@ -209,6 +211,43 @@ def test_scaffolded_domain_is_inferred_back_from_the_clauses():
     assert th.report_only, "measurable tail latency is not the same as a numeric gate"
 
 
+def test_scaffolded_dataflow_is_measurable_report_only(tmp_path: Path):
+    path = scaffold_problem(
+        title="dataflow probe",
+        workload="w",
+        symptom="s",
+        constraint="c",
+        domain="dataflow",
+        out_dir=tmp_path,
+    )
+    th = parse_acceptance_thresholds(load_problem_package(path))
+    assert th.domain == "dataflow"
+    assert th.gradable
+    assert th.report_only
+    assert "pe_utilization" in th.measurable_performance
+    assert not th.has_spec_performance_gate
+
+
+def test_scaffolded_wafer_is_measurable_report_only(tmp_path: Path):
+    path = scaffold_problem(
+        title="wafer probe",
+        workload="w",
+        symptom="s",
+        constraint="c",
+        domain="wafer",
+        out_dir=tmp_path,
+    )
+    th = parse_acceptance_thresholds(load_problem_package(path))
+    assert th.domain == "wafer"
+    assert th.gradable
+    assert th.report_only
+    assert "die_to_die_bw" in th.measurable_performance
+    assert "fabric_hop_latency" in th.measurable_performance
+    assert not th.has_spec_performance_gate
+    assert "yield_redundancy" in th.unmeasurable_metrics
+    assert "thermal_density" in th.unmeasurable_metrics
+
+
 def test_unknown_domain_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="unknown domain"):
         scaffold_problem(
@@ -243,15 +282,10 @@ def test_campaign_clamps_to_tier1_for_an_ungradable_spec(tmp_cfg, tmp_path: Path
     from archzero.funnel.pipeline import acc_gate_for_campaign
     from archzero.models import Tier
     from archzero.spec.ndf import load_problem_package
-    from archzero.spec.wizard import scaffold_problem
 
     tmp_cfg.funnel.strict_acc = True
-    path = scaffold_problem(
+    path = scaffold_unmeasurable_probe(
         title="wafer clamp probe",
-        workload="w",
-        symptom="s",
-        constraint="c",
-        domain="wafer",
         out_dir=tmp_path,
     )
     through, meta = acc_gate_for_campaign(tmp_cfg, load_problem_package(path), Tier.T4)
@@ -340,6 +374,34 @@ def test_offline_noc_seed_reports_numbers_without_inventing_a_gate(tmp_path: Pat
         assert "report-only" in c.tier_history[-1].summary
 
 
+def test_offline_dataflow_seed(tmp_path: Path):
+    from archzero.config import FactoryConfig
+    from archzero.demo_seed import DATAFLOW_MECHANISMS, seed_dataflow_report_campaign
+    from archzero.models import Tier, Verdict
+    from archzero.store.db import Store
+
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    result = seed_dataflow_report_campaign(cfg)
+    assert result["created"]
+    assert result["through"] == "tier4"
+
+    store = Store(cfg.db_path)
+    camp = store.get_campaign(result["campaign_id"])
+    assert camp is not None
+    assert camp.meta["acc"]["report_only"] is True
+    assert "clamped_from" not in camp.meta["acc"]
+
+    cands = store.list_candidates(campaign_id=camp.id)
+    assert len(cands) == len(DATAFLOW_MECHANISMS)
+    for c in cands:
+        assert c.metrics.get("t3_pe_utilization")
+        assert "t3_miss_reduction" not in c.metrics
+        verdicts = {t.tier: t.verdict for t in c.tier_history}
+        assert verdicts[Tier.T3] is Verdict.PASS
+        assert "report-only" in c.tier_history[-1].summary
+
+
 def test_offline_seed_is_idempotent(tmp_path: Path):
     from archzero.config import FactoryConfig
     from archzero.demo_seed import seed_acc_refusal_campaign
@@ -358,15 +420,9 @@ async def test_tier2_declines_ungradable_spec_instead_of_inventing_a_verdict(
 ):
     from archzero.funnel.tier2 import evaluate_tier2
     from archzero.models import Candidate, Tier, Verdict
-    from archzero.spec.wizard import scaffold_problem
-
     tmp_cfg.funnel.strict_acc = True
-    path = scaffold_problem(
+    path = scaffold_unmeasurable_probe(
         title="wafer t2 refuse",
-        workload="w",
-        symptom="s",
-        constraint="c",
-        domain="wafer",
         out_dir=Path(tmp_cfg.state_dir),
     )
     problem = load_problem_package(path)

@@ -216,7 +216,6 @@ class PyCircuitBackend(RtlBackend):
 
 
 def get_rtl_backend(cfg: FactoryConfig) -> RtlBackend:
-    be = PyCircuitBackend(cfg)
-    if be.available():
-        return be
-    return NullRtlBackend()
+    from archzero.rtl.registry import resolve_rtl_backend
+
+    return resolve_rtl_backend(cfg)

@@ -685,11 +685,13 @@ def seed_demo_cmd(
 ) -> None:
     """Seed offline demo campaigns (no LLM) so the funnel UI has sample data.
 
-    Cache (gradable), NoC (measurable, report-only), and wafer-scale (still
-    refused) — so the honesty contract is visible before you spend an API key.
+    Cache (gradable), NoC and dataflow (measurable, report-only), and wafer
+    yield/thermal (still refused). Hop latency and die-to-die bandwidth are
+    now report-only — the honesty contract is visible before an API key.
     """
     from archzero.demo_seed import (
         seed_acc_refusal_campaign,
+        seed_dataflow_report_campaign,
         seed_demo_campaign,
         seed_noc_report_campaign,
     )
@@ -719,13 +721,27 @@ def seed_demo_cmd(
                 f"[yellow]exists[/yellow] campaign {noc['campaign_id']} — {noc['note']}"
             )
 
+    dataflow = seed_dataflow_report_campaign(cfg, force=force)
+    if dataflow.get("campaign_id"):
+        if dataflow["created"]:
+            console.print(
+                f"[green]seeded[/green] campaign {dataflow['campaign_id']} "
+                f"({dataflow['n_candidates']} dataflow candidates, report-only) — "
+                f"解析模型给出 PE 利用率 / SRAM 访存，规范未给门限故不裁决"
+            )
+        else:
+            console.print(
+                f"[yellow]exists[/yellow] campaign {dataflow['campaign_id']} — "
+                f"{dataflow['note']}"
+            )
+
     refusal = seed_acc_refusal_campaign(cfg, force=force)
     if refusal.get("campaign_id"):
         if refusal["created"]:
             console.print(
                 f"[green]seeded[/green] campaign {refusal['campaign_id']} "
-                f"（晶圆级，封顶 {refusal.get('through')}）— "
-                f"演示漏斗如何拒判仍无评估器的领域"
+                f"（晶圆级良率/热密度，封顶 {refusal.get('through')}）— "
+                f"演示漏斗如何拒判仍无评估器的指标"
             )
         else:
             console.print(

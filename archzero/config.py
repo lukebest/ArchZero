@@ -139,7 +139,7 @@ class TaskRouting(BaseModel):
 
 
 class SimConfig(BaseModel):
-    backend: str = "stub"  # stub | directed | champsim | gem5 | noc
+    backend: str = "stub"  # stub | directed | champsim | gem5 | noc | dataflow
     champsim_bin: str | None = None
     gem5_bin: str | None = None
     traces_dir: str | None = None
@@ -147,6 +147,7 @@ class SimConfig(BaseModel):
 
 
 class RtlConfig(BaseModel):
+    backend: str = "pycircuit"  # pycircuit | null
     pycircuit_root: str | None = None  # vendor/pycircuit
     pyc_toolchain_root: str | None = None
     baseline_design: str = "coupled_l2"
@@ -158,6 +159,7 @@ class SignConfig(BaseModel):
     """Tier6 physical signoff — reserved; enabled=False until implemented."""
 
     enabled: bool = False
+    backend: str = "null"  # null until OpenROAD is wired
     yosys_bin: str | None = None
     openroad_bin: str | None = None
     pdk: str | None = None

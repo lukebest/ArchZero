@@ -10,15 +10,11 @@ from typing import Any
 
 from archzero.config import FactoryConfig
 from archzero.evolve.backend import EvolutionBackend
+from archzero.evolve.domains import MUTATE_PERSONA as MUTATE_PERSONA  # noqa: F401
+from archzero.evolve.domains import mutate_persona_for, score_variant
 from archzero.llm.client import CursorLLM
 from archzero.models import Candidate, TaskClass
 from archzero.store.db import Store
-
-MUTATE_PERSONA = """你在做体系结构机制的多样性变异搜索。
-根据父代机制与错误/产物，产出一个变体 JSON：
-{title, family, mechanism, knobs: {miss_reduction, extra_bw, area}}
-title 与 mechanism 必须原生简体中文；family 用英文短标识；knobs 数值保持英文键名。
-保持可行，必要时探索不同 family。"""
 
 
 def _parse_json(text: str) -> dict:
@@ -39,9 +35,34 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
+def _headline_metric(c: Candidate) -> float:
+    """Domain-aware archive coordinate — do not score a NoC child on MPKI=0."""
+    for key in (
+        "t2_miss_reduction",
+        "t3_miss_reduction",
+        "miss_reduction",
+        "t2_goodput",
+        "t3_goodput",
+        "goodput",
+        "t2_pe_utilization",
+        "t3_pe_utilization",
+        "pe_utilization",
+        "t2_die_to_die_bw",
+        "t3_die_to_die_bw",
+        "die_to_die_bw",
+        "t2_fabric_hop_latency",
+        "t3_fabric_hop_latency",
+        "fabric_hop_latency",
+    ):
+        val = c.metrics.get(key)
+        if val is not None:
+            return float(val)
+    return 0.0
+
+
 def _features(c: Candidate) -> tuple:
     family = c.family or "unclassified"
-    err = float(c.metrics.get("t2_miss_reduction") or c.metrics.get("miss_reduction") or 0)
+    err = _headline_metric(c)
     # bin error into coarse cells
     err_bin = int(min(9, max(0, err * 10)))
     speedup = float(c.metrics.get("t2_ipc_speedup") or c.metrics.get("ipc") or 1.0)
@@ -52,8 +73,7 @@ def _features(c: Candidate) -> tuple:
 
 
 def _fitness(c: Candidate) -> float:
-    r = float(c.metrics.get("t2_miss_reduction") or c.metrics.get("t3_miss_reduction") or 0)
-    score = r
+    score = _headline_metric(c)
     if c.metrics.get("t2_meets_target"):
         score += 0.2
     # Penalize failures
@@ -73,6 +93,15 @@ class MapElitesBackend(EvolutionBackend):
         campaign_id: str | None = None,
     ) -> dict[str, Any]:
         store = Store(cfg.db_path)
+        domain = "cache"
+        if campaign_id:
+            camp = store.get_campaign(campaign_id)
+            if camp:
+                problem = store.get_problem(camp.problem_id)
+                if problem is not None:
+                    from archzero.spec.acc_parse import parse_acceptance_thresholds
+
+                    domain = parse_acceptance_thresholds(problem).domain
         async with CursorLLM(cfg, store=store, campaign_id=campaign_id) as llm:
             islands: list[dict[tuple, Candidate]] = [
                 {} for _ in range(cfg.evolve.islands)
@@ -99,13 +128,24 @@ class MapElitesBackend(EvolutionBackend):
                     try:
                         data = _parse_json(
                             await llm.complete(
-                                MUTATE_PERSONA, ctx, TaskClass.EVOLVE, expect_json=True
+                                mutate_persona_for(domain),
+                                ctx,
+                                TaskClass.EVOLVE,
+                                expect_json=True,
                             )
                         )
                     except Exception:  # noqa: BLE001
                         return None
                     if not data.get("mechanism"):
                         return None
+                    knobs = data.get("knobs") or {}
+                    metrics: dict[str, Any] = {
+                        "evolved_gen": gen,
+                        "source_failure_ids": [f.id for f in parent.failures],
+                    }
+                    if domain == "cache":
+                        metrics["miss_reduction"] = knobs.get("miss_reduction", 0.12)
+                        metrics["area"] = knobs.get("area", 0.3)
                     child = Candidate(
                         problem_id=parent.problem_id,
                         title=str(data.get("title") or f"{parent.title} mut{gen}"),
@@ -113,62 +153,26 @@ class MapElitesBackend(EvolutionBackend):
                         family=str(data.get("family") or parent.family),
                         parent_id=parent.id,
                         clause_refs=list(parent.clause_refs),
-                        metrics={
-                            "miss_reduction": (data.get("knobs") or {}).get(
-                                "miss_reduction", 0.12
-                            ),
-                            "area": (data.get("knobs") or {}).get("area", 0.3),
-                            "evolved_gen": gen,
-                            "source_failure_ids": [f.id for f in parent.failures],
-                        },
+                        metrics=metrics,
                     )
                     # Cheap analytic eval (not stub-only)
                     work = cfg.scratch_dir / child.id
                     work.mkdir(parents=True, exist_ok=True)
                     child.workdir = str(work)
-                    knobs = data.get("knobs") or {
-                        "miss_reduction": 0.12,
-                        "extra_bw": 0.02,
-                        "area": 0.3,
-                    }
                     (work / "sim_knobs.json").write_text(
                         json.dumps(knobs, indent=2), encoding="utf-8"
                     )
-                    from archzero.analytic.core import (
-                        MechanismEffect,
-                        Workload,
-                        score_mechanism,
-                    )
-
                     try:
-                        scored = score_mechanism(
-                            Workload(
-                                name="evolve-proxy",
-                                baseline_mpki=8.0,
-                                baseline_ipc=1.4,
-                                mem_bandwidth_gbps=40.0,
-                                peak_bandwidth_gbps=50.0,
-                            ),
-                            MechanismEffect(
-                                miss_reduction_frac=float(
-                                    knobs.get("miss_reduction") or 0.12
-                                ),
-                                extra_bw_frac=float(knobs.get("extra_bw") or 0.02),
-                                area_mm2=float(knobs.get("area") or 0.3),
-                            ),
-                        )
+                        scored = score_variant(domain, child.family, knobs)
                     except Exception:  # noqa: BLE001
-                        scored = {
-                            "miss_reduction": float(knobs.get("miss_reduction") or 0.12),
-                            "meets_target": True,
-                            "ipc_speedup": 1.05,
-                        }
+                        scored = {}
                     child.metrics.update({f"t2_{k}": v for k, v in scored.items()})
-                    child.metrics["t2_miss_reduction"] = float(
-                        scored.get("miss_reduction")
-                        or knobs.get("miss_reduction")
-                        or 0
-                    )
+                    if domain == "cache":
+                        child.metrics["t2_miss_reduction"] = float(
+                            scored.get("miss_reduction")
+                            or knobs.get("miss_reduction")
+                            or 0
+                        )
                     child.metrics["evolved_gen"] = gen
                     return child
 
@@ -247,12 +251,9 @@ async def run_evolution(
     if not seeds:
         return {"error": "no candidates to evolve", "campaign_id": campaign_id}
 
-    if cfg.evolve.backend == "openevolve":
-        from archzero.evolve.openevolve_adapter import OpenEvolveBackend
+    from archzero.evolve.registry import resolve_evolve_backend
 
-        backend: EvolutionBackend = OpenEvolveBackend()
-    else:
-        backend = MapElitesBackend()
+    backend = resolve_evolve_backend(cfg)
     summary = await backend.run(
         cfg, seeds, generations=generations, campaign_id=campaign_id
     )

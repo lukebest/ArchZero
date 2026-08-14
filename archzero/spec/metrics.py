@@ -187,8 +187,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=HIGHER_IS_BETTER,
         domain=DATAFLOW,
         aliases=("pe utilization", "pe 利用率", "阵列利用率", "mac utilization"),
-        evaluators=(),
-        note="Needs a Timeloop/SCALE-Sim style mapper; not implemented.",
+        evaluators=("analytic", "sim"),
+        note="Produced by the analytic dataflow backend (archzero.sim.dataflow).",
     ),
     MetricSpec(
         id="reuse_factor",
@@ -197,8 +197,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=HIGHER_IS_BETTER,
         domain=DATAFLOW,
         aliases=("data reuse", "reuse factor", "数据复用"),
-        evaluators=(),
-        note="Needs a dataflow mapper; not implemented.",
+        evaluators=("analytic", "sim"),
+        note="Produced by the analytic dataflow backend (archzero.sim.dataflow).",
     ),
     MetricSpec(
         id="sram_traffic",
@@ -207,8 +207,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=LOWER_IS_BETTER,
         domain=DATAFLOW,
         aliases=("sram traffic", "on-chip traffic", "片上访存"),
-        evaluators=(),
-        note="Needs a dataflow mapper; not implemented.",
+        evaluators=("analytic", "sim"),
+        note="Produced by the analytic dataflow backend (archzero.sim.dataflow).",
     ),
     # --- wafer-scale / multi-die ---
     MetricSpec(
@@ -218,8 +218,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=HIGHER_IS_BETTER,
         domain=WAFER,
         aliases=("die-to-die bandwidth", "die to die", "d2d bandwidth", "裸片间带宽", "chiplet bandwidth"),
-        evaluators=(),
-        note="Needs a multi-die fabric model; not implemented.",
+        evaluators=("analytic", "sim"),
+        note="Produced by the analytic wafer backend (archzero.sim.wafer).",
     ),
     MetricSpec(
         id="fabric_hop_latency",
@@ -228,8 +228,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=LOWER_IS_BETTER,
         domain=WAFER,
         aliases=("hop latency", "fabric latency", "跳数时延"),
-        evaluators=(),
-        note="Needs a wafer-fabric model; not implemented.",
+        evaluators=("analytic", "sim"),
+        note="Produced by the analytic wafer backend (archzero.sim.wafer).",
     ),
     MetricSpec(
         id="yield_redundancy",

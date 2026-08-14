@@ -63,6 +63,13 @@ class SimMetrics(BaseModel):
     completion_latency: float | None = None
     goodput: float | None = None
     link_utilization: float | None = None
+    # Spatial accelerator / dataflow. None = this backend does not produce them.
+    pe_utilization: float | None = None
+    reuse_factor: float | None = None
+    sram_traffic: float | None = None
+    # Wafer-scale / multi-die fabric. None = this backend does not produce them.
+    die_to_die_bw: float | None = None
+    fabric_hop_latency: float | None = None
     per_trace: list[TraceMetrics] = Field(default_factory=list)
     note: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
@@ -100,6 +107,11 @@ class SimMetrics(BaseModel):
                 "completion_latency",
                 "goodput",
                 "link_utilization",
+                "pe_utilization",
+                "reuse_factor",
+                "sram_traffic",
+                "die_to_die_bw",
+                "fabric_hop_latency",
             )
             if self.measured(mid) is not None
         ]
