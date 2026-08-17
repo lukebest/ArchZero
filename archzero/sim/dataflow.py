@@ -228,6 +228,7 @@ class DataflowAnalyticBackend(SimBackend):
             pe_utilization=agg["pe_utilization"],
             reuse_factor=agg["reuse_factor"],
             sram_traffic=agg["sram_traffic"],
+            coverage=report["coverage"],
             note=(
                 "analytic PE-array GEMM mapper on a 16×16 / 256 KiB iso-resource "
                 "point; not Timeloop or a cycle-accurate systolic RTL. "

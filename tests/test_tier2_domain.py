@@ -93,6 +93,8 @@ async def test_tier2_noc_helper_model_is_report_only(tmp_cfg):
     assert "p99_latency" in model
     assert "miss_reduction" not in model
     assert model.get("meets_target") is None
+    assert last.score == pytest.approx(float(model["goodput"]), rel=1e-3)
+    assert last.score < 2.0  # not a p99 cycle count
 
 
 @pytest.mark.asyncio
@@ -165,3 +167,19 @@ def test_threshold_gate_still_report_only_for_noc():
     ok, note = _threshold_gate({"p99_latency": 1000, "goodput": 0.3}, th)
     assert ok
     assert "report-only" in note
+
+def test_headline_score_noc_uses_goodput_not_p99():
+    from archzero.funnel.tier2 import _headline_score
+    from archzero.spec.acc_parse import parse_acceptance_thresholds
+    from archzero.spec.ndf import load_problem_package
+
+    th = parse_acceptance_thresholds(
+        load_problem_package(
+            Path(__file__).resolve().parents[1] / "specs" / "noc_low_tail_collectives.md"
+        )
+    )
+    worse_tail = {"p99_latency": 9000.0, "goodput": 0.35, "completion_latency": 4000.0}
+    better_tail = {"p99_latency": 1200.0, "goodput": 0.80, "completion_latency": 800.0}
+    assert _headline_score(worse_tail, th) == pytest.approx(0.35)
+    assert _headline_score(better_tail, th) == pytest.approx(0.80)
+    assert _headline_score(better_tail, th) > _headline_score(worse_tail, th)

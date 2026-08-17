@@ -11,6 +11,7 @@ from pathlib import Path
 from archzero.config import ROOT, FactoryConfig
 from archzero.report.weekly import build_report
 from archzero.sim.headlines import candidate_headlines, headlines_text
+from archzero.spec.acc_parse import parse_acceptance_thresholds
 from archzero.spec.ndf import render_problem_package
 from archzero.store.db import Store
 
@@ -71,6 +72,7 @@ def export_campaign_bundle(
     (root / "candidates").mkdir(parents=True)
     (root / "artifacts").mkdir(parents=True)
 
+    pp = store.get_problem(camp.problem_id)
     manifest = {
         "product": "ArchZero Idea Factory",
         "paper": "https://arxiv.org/abs/2604.03312",
@@ -86,6 +88,7 @@ def export_campaign_bundle(
         "tool_versions": _tool_versions(),
         "preferred_cursor": cfg.pools.preferred_cursor,
         "tier6": "reserved",
+        "domain": parse_acceptance_thresholds(pp).domain if pp else "generic",
     }
     (root / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
@@ -102,7 +105,6 @@ def export_campaign_bundle(
     if catalog.is_file():
         shutil.copy2(catalog, root / "model_catalog.json")
 
-    pp = store.get_problem(camp.problem_id)
     if pp and pp.source_path and Path(pp.source_path).is_file():
         shutil.copy2(pp.source_path, root / "problem.md")
     elif pp:

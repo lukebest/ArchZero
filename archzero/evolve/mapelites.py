@@ -14,6 +14,7 @@ from archzero.evolve.domains import MUTATE_PERSONA as MUTATE_PERSONA  # noqa: F4
 from archzero.evolve.domains import mutate_persona_for, score_variant
 from archzero.llm.client import CursorLLM
 from archzero.models import Candidate, TaskClass
+from archzero.sim.headlines import ranking_score
 from archzero.store.db import Store
 
 
@@ -37,26 +38,9 @@ def _parse_json(text: str) -> dict:
 
 def _headline_metric(c: Candidate) -> float:
     """Domain-aware archive coordinate — do not score a NoC child on MPKI=0."""
-    for key in (
-        "t2_miss_reduction",
-        "t3_miss_reduction",
-        "miss_reduction",
-        "t2_goodput",
-        "t3_goodput",
-        "goodput",
-        "t2_pe_utilization",
-        "t3_pe_utilization",
-        "pe_utilization",
-        "t2_die_to_die_bw",
-        "t3_die_to_die_bw",
-        "die_to_die_bw",
-        "t2_fabric_hop_latency",
-        "t3_fabric_hop_latency",
-        "fabric_hop_latency",
-    ):
-        val = c.metrics.get(key)
-        if val is not None:
-            return float(val)
+    scored = ranking_score(c.metrics, family=c.family)
+    if scored is not None:
+        return scored
     return 0.0
 
 

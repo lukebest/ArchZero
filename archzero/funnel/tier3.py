@@ -22,7 +22,8 @@ from archzero.sim.backend import SimRequest
 from archzero.sim.champsim_config import write_champsim_scaffold
 from archzero.sim.gem5_harness import write_gem5_harness
 from archzero.sim.generate import generate_dedicated_sim, generate_dedicated_sim_llm
-from archzero.sim.mechanism_model import report_magic_gap
+from archzero.sim.headlines import headlines_text, ranking_score
+from archzero.sim.mechanism_model import domain_magic_gap
 from archzero.sim.metrics import SimMetrics
 from archzero.sim.registry import resolve_backend_for_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
@@ -172,10 +173,11 @@ async def evaluate_tier3(
     candidate.metrics["t3_adjudicated"] = outcome.adjudicated
     reduction = metrics_obj.miss_reduction
     bw = metrics_obj.bw_delta_frac
-    if reduction is None:
-        reduction = 0.0
-    if bw is None:
-        bw = 0.0
+    score = ranking_score(
+        sim.metrics, family=candidate.family, domain=th.domain
+    )
+    if score is None and th.domain in ("cache", "generic") and reduction is not None:
+        score = float(reduction)
 
     # Paper profile: dedicated_sim is adjudicating evidence, not audit-only.
     if cfg.funnel.llm_dedicated_sim and not gen.selftest_ok:
@@ -194,15 +196,14 @@ async def evaluate_tier3(
         else:
             candidate.metrics["t3_dedicated_adjudication"] = "ok"
 
-    model_red = candidate.metrics.get("t2_miss_reduction")
-    sim_red = metrics_obj.miss_reduction
-    gap = None
-    if model_red is not None and sim_red is not None:
-        gap = report_magic_gap(float(model_red), float(sim_red))
-        if gap is not None:
-            candidate.metrics["t3_magic_gap"] = gap
-            if th.from_spec("max_magic_gap") and gap > th.max_magic_gap:
-                gate_ok = False
+    gap, gap_metric = domain_magic_gap(
+        candidate.metrics, sim.metrics, th.domain
+    )
+    if gap is not None:
+        candidate.metrics["t3_magic_gap"] = gap
+        candidate.metrics["t3_magic_gap_metric"] = gap_metric
+        if th.from_spec("max_magic_gap") and gap > th.max_magic_gap:
+            gate_ok = False
 
     evidence = EvidenceLevel.STUB
     ev = str(sim.metrics.get("evidence") or "")
@@ -231,7 +232,7 @@ async def evaluate_tier3(
         result = TierResult(
             tier=Tier.T3,
             verdict=verdict,
-            score=reduction,
+            score=score,
             summary=summary,
             metrics={**sim.metrics, "thresholds": th.as_dict(), "magic_gap": gap,
                  "dedicated_selftest": gen.selftest_ok,
@@ -251,15 +252,21 @@ async def evaluate_tier3(
             summary = f"{sim.backend}: stub evidence rejected under strict_evidence"
         else:
             verdict = Verdict.PASS if gate_ok else Verdict.FAIL
-            gap_note = f" magic_gap={gap:.2f}" if gap is not None else ""
-            summary = (
-                f"{sim.backend}: stub evidence reduction={reduction:.2%} "
-                f"bwΔ={bw:.2%}{gap_note}"
-            )
+            gap_note = f" magic_gap={gap:.2f}({gap_metric})" if gap is not None else ""
+            if th.domain not in ("cache", "generic") or reduction is None:
+                hl = headlines_text(sim.metrics, family=candidate.family)
+                extra = f" {hl}" if hl else f" domain={th.domain}"
+                adj = " report-only" if not outcome.adjudicated else ""
+                summary = f"{sim.backend}:{extra}{adj}{gap_note}"
+            else:
+                summary = (
+                    f"{sim.backend}: stub evidence reduction={float(reduction):.2%} "
+                    f"bwΔ={float(bw or 0):.2%}{gap_note}"
+                )
             evidence = EvidenceLevel.STUB
     else:
         verdict = Verdict.PASS if gate_ok else Verdict.FAIL
-        gap_note = f" magic_gap={gap:.2f}" if gap is not None else ""
+        gap_note = f" magic_gap={gap:.2f}({gap_metric})" if gap is not None else ""
         if metrics_obj.p99_latency is not None:
             adj = "report-only" if not outcome.adjudicated else f"ok={gate_ok}"
             summary = (
@@ -279,16 +286,19 @@ async def evaluate_tier3(
                 f"{adj}{gap_note}"
             )
         else:
-            summary = (
-                f"{sim.backend}: reduction={reduction:.2%} bwΔ={bw:.2%} "
-                f"ok={gate_ok}{gap_note}"
-            )
+            if reduction is None:
+                hl = headlines_text(sim.metrics, family=candidate.family)
+                summary = (
+                    f"{sim.backend}: {hl or ('domain=' + th.domain)} "
+                    f"ok={gate_ok}{gap_note}"
+                )
+            else:
+                summary = (
+                    f"{sim.backend}: reduction={float(reduction):.2%} "
+                    f"bwΔ={float(bw or 0):.2%} "
+                    f"ok={gate_ok}{gap_note}"
+                )
 
-    score = (
-        float(metrics_obj.goodput)
-        if metrics_obj.goodput is not None
-        else float(reduction)
-    )
     result = TierResult(
         tier=Tier.T3,
         verdict=verdict,

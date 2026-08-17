@@ -128,22 +128,34 @@ class FamilyModel:
     sync_setup_diameters: float
     # Bufferless deflection tax (1.0 = none).
     bufferless_tax: float
+    # Arrival-spread tail tax (p99_jittered / p99_clean). Lower is better.
+    jitter_tax: float
 
 
 FAMILIES: dict[str, FamilyModel] = {
     "packet_switched": FamilyModel(
-        "packet_switched", 1.35, 1.80, 2.60, 0.55, 0.0, 1.35
+        "packet_switched", 1.35, 1.80, 2.60, 0.55, 0.0, 1.35, 1.35
     ),
     "request_grant": FamilyModel(
-        "request_grant", 1.08, 1.25, 1.45, 0.48, 1.0, 1.10
+        "request_grant", 1.08, 1.25, 1.45, 0.48, 1.0, 1.10, 1.65
     ),
     "push_on_pull": FamilyModel(
-        "push_on_pull", 1.15, 1.40, 1.70, 0.58, 0.0, 1.15
+        "push_on_pull", 1.15, 1.40, 1.70, 0.58, 0.0, 1.15, 1.20
     ),
     "presched": FamilyModel(
-        "presched", 1.02, 1.08, 1.12, 0.70, 0.0, 1.05
+        "presched", 1.02, 1.08, 1.12, 0.70, 0.0, 1.05, 2.20
     ),
 }
+
+
+def _jitter_mult(family: FamilyModel, pattern: str) -> float:
+    tax = family.jitter_tax
+    if pattern in SYNC_COLLECTIVES:
+        if family.id == "presched":
+            tax *= 1.25
+        elif family.id == "request_grant":
+            tax *= 1.10
+    return tax
 
 
 def infer_noc_family(title: str, mechanism: str, family: str | None) -> str:
@@ -218,6 +230,8 @@ def evaluate_config(
     mean = base * family.contention
     p95 = mean * family.tail_p95
     p99 = mean * family.tail_p99
+    jmult = _jitter_mult(family, pattern)
+    p99_j = p99 * jmult
     # Useful bytes relative to (completion × bisection): a unitless efficiency.
     useful = message_b * (topo.n if pattern != "p2p" else 1.0)
     capacity = mean * topo.bisection_bpc
@@ -227,6 +241,8 @@ def evaluate_config(
         "completion_latency": mean,
         "p95_latency": p95,
         "p99_latency": p99,
+        "p99_jittered": p99_j,
+        "jitter_tolerance": (p99_j / p99) if p99 else 1.0,
         "goodput": goodput,
         "link_utilization": raw_util,
         "noload_cycles": base,
@@ -306,6 +322,8 @@ def run_matrix(
             "p99_latency": _geo("p99_latency"),
             "goodput": _geo("goodput"),
             "link_utilization": _geo("link_utilization"),
+            "jitter_tolerance": _geo("jitter_tolerance"),
+            "coverage": len(rows) / (2 * 2 * (len(COLLECTIVES) + 1)),
         },
         "matrix": rows,
         "coverage": len(rows) / (2 * 2 * (len(COLLECTIVES) + 1)),
@@ -347,10 +365,13 @@ class NocAnalyticBackend(SimBackend):
             p99_latency=agg["p99_latency"],
             goodput=agg["goodput"],
             link_utilization=agg["link_utilization"],
+            jitter_tolerance=agg["jitter_tolerance"],
+            coverage=report["coverage"],
             note=(
                 "analytic α-β + bisection model on 8×6 iso-wire mesh/torus; "
                 "not a flit-level trace. Tail multipliers are family contention "
-                "assumptions, not measured distributions."
+                "assumptions, not measured distributions. "
+                "Jitter tax is a family contention assumption (arrival-spread injection), not a measured trace."
             ),
             extra={
                 "family": family_id,

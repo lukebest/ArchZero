@@ -53,6 +53,8 @@ def test_export_noc_seed_has_headlines(tmp_path):
     cfg.gauntlet_personas.mkdir(parents=True, exist_ok=True)
     result = seed_noc_report_campaign(cfg)
     root = export_campaign_bundle(cfg, result["campaign_id"], tmp_path / "bundles")
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest.get("domain") == "noc"
     index = json.loads((root / "candidates.json").read_text(encoding="utf-8"))
     assert index
     assert all("headlines" in e for e in index)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from archzero.config import ROOT
 from archzero.sim.backend import SimRequest
 from archzero.sim.metrics import MetricGate, SimMetrics
@@ -93,8 +95,11 @@ def test_backend_emits_noc_metrics_not_mpki(tmp_cfg, tmp_path):
     assert result.backend == "noc"
     assert result.metrics["p99_latency"] > 0
     assert result.metrics["goodput"] > 0
+    assert result.metrics.get("jitter_tolerance") is not None
     assert "miss_reduction" not in result.metrics
     assert result.metrics["iso_wire"]["iso_bisection"] is True
+    assert 0 < result.metrics["coverage"] <= 1
+    assert result.metrics["coverage"] < 1
 
 
 def test_noc_result_is_report_only_against_the_real_spec():
@@ -124,3 +129,42 @@ def test_declared_noc_gate_can_still_fail():
     assert outcome.adjudicated is True
     assert outcome.ok is False
     assert "p99_latency" in outcome.failed
+
+
+def test_presched_is_most_jitter_fragile():
+    taxes = {
+        fid: run_matrix(family_id=fid, suite="small")["aggregate"]["jitter_tolerance"]
+        for fid in FAMILIES
+    }
+    assert taxes["push_on_pull"] < taxes["packet_switched"]
+    assert taxes["packet_switched"] < taxes["request_grant"]
+    assert taxes["request_grant"] < taxes["presched"]
+    assert taxes["presched"] > 2.0
+
+
+def test_backend_emits_jitter_tolerance(tmp_cfg, tmp_path):
+    from archzero.sim.backend import SimRequest
+    from archzero.sim.noc import NocAnalyticBackend
+
+    work = tmp_path / "wj"
+    work.mkdir()
+    result = NocAnalyticBackend(tmp_cfg).run(
+        SimRequest(
+            candidate_id="c-j",
+            workdir=work,
+            patch_hint="Compiled slot table",
+            suite="small",
+            meta={"title": "presched", "family": "presched"},
+        )
+    )
+    assert result.metrics.get("jitter_tolerance") is not None
+    assert float(result.metrics["jitter_tolerance"]) > 1.0
+    assert "miss_reduction" not in result.metrics
+
+
+
+def test_full_suite_reports_complete_coverage():
+    small = run_matrix(family_id="request_grant", suite="small")
+    full = run_matrix(family_id="request_grant", suite="full")
+    assert small["coverage"] < full["coverage"]
+    assert full["coverage"] == pytest.approx(1.0)

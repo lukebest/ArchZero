@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from archzero.models import Campaign, Candidate, Tier, TierResult, Verdict
 from archzero.report.weekly import build_report
-from archzero.sim.headlines import candidate_headlines, headlines_text, metrics_domain
+from archzero.sim.headlines import (
+    candidate_headlines,
+    headlines_text,
+    metrics_domain,
+    ranking_score,
+)
 from archzero.store.db import Store
 from archzero.web.app import _serialize_candidate
 
@@ -69,3 +76,16 @@ def test_weekly_survivor_shows_domain_headlines(tmp_cfg, demo_problem):
     text = build_report(tmp_cfg, campaign_id=camp.id)
     assert "p99=" in text
     assert "goodput=" in text
+    assert "tier_score=" in text
+    assert " score=" not in text
+
+
+def test_ranking_score_noc_uses_goodput_not_leaked_mpki():
+    metrics = {
+        "t3_p99_latency": 1746.0,
+        "t3_goodput": 0.81,
+        "t3_miss_reduction": 0.22,
+    }
+    assert ranking_score(metrics, family="request_grant") == pytest.approx(0.81)
+    assert ranking_score({"t3_miss_reduction": 0.22}, family="request_grant") is None
+    assert ranking_score({"t3_miss_reduction": 0.18}, family="prefetch") == pytest.approx(0.18)

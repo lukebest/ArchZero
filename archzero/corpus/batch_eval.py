@@ -10,30 +10,14 @@ from archzero.config import FactoryConfig
 from archzero.corpus.status import corpus_status, default_corpus_root
 from archzero.llm.fake import FakeLLM
 from archzero.models import Candidate, Tier
+from archzero.offline import fake_llm_responses, knobs_for, problem_domain
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
 
 
-def _fake_llm() -> FakeLLM:
+def _fake_llm(domain: str) -> FakeLLM:
     return FakeLLM(
-        responses={
-            "bulk_screen": (
-                '{"verdict":"pass","score":0.8,"summary":"ok",'
-                '"physics_flags":[],"clause_refs":[]}'
-            ),
-            "comprehend": "**Status:** PASS\nCritique:\n- ok\n",
-            "synthesize": (
-                '{"verdict":"pass","score":0.7,"summary":"ok",'
-                '"failure_modes":[],"clause_refs":[]}'
-            ),
-            "spec_gen": "# Spec\nAssumptions...\n",
-            "analytic": (
-                "```python\ndef run_model():\n"
-                "    return {'predicted_mpki':6.0,'miss_reduction':0.18,"
-                "'ipc_speedup':1.05,'meets_target':True}\n```"
-            ),
-            "final_judge": '{"verdict":"pass","score":0.8,"summary":"ok","clause_refs":[]}',
-        },
+        responses=fake_llm_responses(domain),
         sequence=[
             '{"verdict":"pass","score":0.8,"summary":"insight ok",'
             '"magic_gap_notes":"","clause_refs":[]}'
@@ -65,19 +49,14 @@ async def evaluate_corpus_entry(
         }
 
     pp = load_problem_package(spec_path)
+    family = str(entry.get("family") or "unclassified")
+    domain = problem_domain(pp, family)
     store = Store(cfg.db_path)
     store.save_problem(pp)
     work = cfg.scratch_dir / "corpus" / str(entry.get("id") or "anon")
     work.mkdir(parents=True, exist_ok=True)
     (work / "sim_knobs.json").write_text(
-        json.dumps(
-            {
-                "miss_reduction": 0.18,
-                "extra_bw": 0.02,
-                "area": 0.25,
-                "family": entry.get("family") or "unclassified",
-            }
-        ),
+        json.dumps(knobs_for(domain, family)),
         encoding="utf-8",
     )
     cand = Candidate(
@@ -85,21 +64,18 @@ async def evaluate_corpus_entry(
         title=str(entry.get("title") or entry.get("id")),
         mechanism=(
             f"Corpus scaffold candidate for {entry.get('id')} "
-            f"({entry.get('family')}). Offline FakeLLM evaluation only."
+            f"({family}, domain={domain}). Offline FakeLLM evaluation only."
         ),
-        family=str(entry.get("family") or "unclassified"),
+        family=family,
         workdir=str(work),
-        metrics={"corpus_entry_id": entry.get("id")},
+        metrics={"corpus_entry_id": entry.get("id"), "domain": domain},
     )
 
-    # Temporarily inject FakeLLM via monkeypatch on run_campaign internals:
-    # run_campaign constructs CursorLLM — use candidates_override + patch.
-    # Simpler: call tier functions directly with FakeLLM.
     from archzero.funnel.tier0 import evaluate_tier0
     from archzero.funnel.tier1 import evaluate_tier1
     from archzero.funnel.tier2 import evaluate_tier2
 
-    llm = _fake_llm()
+    llm = _fake_llm(domain)
     cfg.funnel.use_verifiers = True
     cfg.funnel.ensemble_n = 1
     cfg.sim.backend = "stub"
@@ -119,6 +95,7 @@ async def evaluate_corpus_entry(
     return {
         "entry_id": entry.get("id"),
         "ok": True,
+        "domain": domain,
         "through": through.value,
         "last_verdict": last.verdict.value if last else None,
         "last_tier": last.tier.value if last else None,
@@ -157,13 +134,13 @@ async def evaluate_corpus_batch(
             cfg, entry, corpus_root=root, through=through
         )
         results.append(row)
-        # Persist evaluated flag only — never invent cleanroom_label / success_rate.
         eid = str(entry.get("id") or "")
         target = by_id.get(eid)
         if target is not None and row.get("ok"):
             target["evaluated"] = True
             target["last_offline_verdict"] = row.get("last_verdict")
             target["last_offline_tier"] = row.get("last_tier")
+            target["domain"] = row.get("domain")
 
     manifest_path = root / "manifest.json"
     manifest_path.write_text(
@@ -178,7 +155,6 @@ async def evaluate_corpus_batch(
         "corpus": str(root),
         "n_entries": len(results),
         "n_pass_offline": n_ok,
-        # Explicitly withhold success_rate on scaffold
         "success_rate": None,
         "disclaimer": (
             "Offline FakeLLM batch only. success_rate remains null while "

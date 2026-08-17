@@ -78,8 +78,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=HIGHER_IS_BETTER,
         domain=GENERIC,
         aliases=("矩阵覆盖率", "coverage", "覆盖率"),
-        evaluators=(),
-        note="No tier tracks experiment-matrix coverage yet.",
+        evaluators=("analytic",),
+        note="Fraction of the analytic experiment matrix that this run actually evaluated (NoC: topo × buffer × pattern; dataflow: shapes). Small suite is partial by design.",
     ),
     # --- cache / memory hierarchy ---
     MetricSpec(
@@ -176,8 +176,8 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         direction=LOWER_IS_BETTER,
         domain=NOC,
         aliases=("jitter", "抖动"),
-        evaluators=(),
-        note="Needs a jitter-injection harness; not implemented.",
+        evaluators=("analytic",),
+        note="Analytic NoC backend: p99 under a standard arrival-spread injection over clean p99. Family tax, not a flit-level harness.",
     ),
     # --- dataflow / spatial accelerators ---
     MetricSpec(
@@ -239,7 +239,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         domain=WAFER,
         aliases=("yield", "redundancy", "良率", "冗余"),
         evaluators=(),
-        note="Needs a defect/redundancy model; not implemented.",
+        note="No defect-map / spare-tile / redundancy-cost model exists. Fabric hop latency and die-to-die BW are measurable and must not be treated as a yield verdict.",
     ),
     MetricSpec(
         id="thermal_density",
@@ -249,7 +249,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         domain=WAFER,
         aliases=("power density", "thermal density", "功耗密度"),
         evaluators=(),
-        note="Needs a thermal model; not implemented.",
+        note="No power-map or thermal-RC model exists. Fabric hop/d2d numbers are not a thermal-density measurement.",
     ),
 )
 

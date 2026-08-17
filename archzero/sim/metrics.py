@@ -63,6 +63,9 @@ class SimMetrics(BaseModel):
     completion_latency: float | None = None
     goodput: float | None = None
     link_utilization: float | None = None
+    jitter_tolerance: float | None = None
+    # Generic / matrix coverage. None = this backend does not produce it.
+    coverage: float | None = None
     # Spatial accelerator / dataflow. None = this backend does not produce them.
     pe_utilization: float | None = None
     reuse_factor: float | None = None
@@ -107,6 +110,8 @@ class SimMetrics(BaseModel):
                 "completion_latency",
                 "goodput",
                 "link_utilization",
+                "jitter_tolerance",
+                "coverage",
                 "pe_utilization",
                 "reuse_factor",
                 "sram_traffic",

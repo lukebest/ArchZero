@@ -7,7 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from archzero.config import FactoryConfig
+from archzero.llm.fake import FakeLLM
 from archzero.models import Candidate, Tier
+from archzero.offline import (
+    default_family,
+    fake_llm_responses,
+    knobs_for,
+    problem_domain,
+    scaffold_mechanism,
+    scaffold_title,
+)
+from archzero.sim.headlines import headlines_text
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
 
@@ -31,26 +41,22 @@ async def run_e2e(
             name="e2e-online",
         )
 
-    from archzero.llm.fake import FakeLLM
-
     pp = load_problem_package(spec_path)
+    domain = problem_domain(pp)
+    family = default_family(domain)
     store = Store(cfg.db_path)
     store.save_problem(pp)
     work = cfg.scratch_dir / "e2e" / "cand"
     work.mkdir(parents=True, exist_ok=True)
     cand = Candidate(
         problem_id=pp.id,
-        title="E2E demo prefetch filter",
-        mechanism=(
-            "A small dead-block predictor filters L2 prefetch requests under "
-            "LLM decode traffic to cut MPKI without large area."
-        ),
-        family="prefetch",
+        title=scaffold_title(domain),
+        mechanism=scaffold_mechanism(domain),
+        family=family,
         workdir=str(work),
     )
-    # Pre-write knobs / minimal DSL stubs for offline path
     (work / "sim_knobs.json").write_text(
-        json.dumps({"miss_reduction": 0.18, "extra_bw": 0.02, "area": 0.25}),
+        json.dumps(knobs_for(domain, family)),
         encoding="utf-8",
     )
     (work / "design.py").write_text(
@@ -62,23 +68,11 @@ async def run_e2e(
     )
 
     llm = FakeLLM(
-        responses={
-            "bulk_screen": '{"verdict":"pass","score":0.8,"summary":"ok","physics_flags":[],"clause_refs":[]}',
-            "comprehend": "## review\nLooks plausible.",
-            "synthesize": '{"verdict":"pass","score":0.7,"summary":"ok","failure_modes":[],"clause_refs":[]}',
-            "spec_gen": "# Spec\nAssumptions...\n",
-            "analytic": (
-                "```python\ndef run_model():\n"
-                "    return {'predicted_mpki':6.0,'miss_reduction':0.18,"
-                "'ipc_speedup':1.05,'meets_target':True}\n```"
-            ),
-            "final_judge": '{"verdict":"pass","score":0.8,"summary":"ok","clause_refs":[]}',
-        }
+        responses=fake_llm_responses(domain),
+        sequence=[
+            '{"verdict":"pass","score":0.8,"summary":"insight ok","magic_gap_notes":"","clause_refs":[]}',
+        ],
     )
-    # Also handle insight JSON on second analytic call via sequence
-    llm.sequence = [
-        '{"verdict":"pass","score":0.8,"summary":"insight ok","magic_gap_notes":"","clause_refs":[]}',
-    ]
 
     from archzero.funnel import tier0, tier1, tier2, tier3, tier4, tier5, tier6
 
@@ -109,6 +103,9 @@ async def run_e2e(
         "offline": True,
         "candidate_id": cand.id,
         "through": through.value,
+        "domain": domain,
+        "family": cand.family,
+        "headlines": headlines_text(cand.metrics, family=cand.family),
         "tier_history": [
             {
                 "tier": tr.tier.value,

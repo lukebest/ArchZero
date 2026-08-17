@@ -27,6 +27,7 @@ from archzero.models import (
     Tier,
     Verdict,
 )
+from archzero.sim.headlines import stored_rank
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
@@ -119,6 +120,19 @@ def _load_seeds(seed_dir: Path, problem: ProblemPackage) -> list[Candidate]:
             )
         )
     return cands
+
+
+
+def candidate_keep_score(candidate: Candidate, tier: Tier) -> float:
+    """Sort key for the keep-N cut. Never invent MPKI=0 for off-cache work."""
+    stored = None
+    for t in reversed(candidate.tier_history):
+        if t.tier == tier and t.score is not None:
+            stored = float(t.score)
+            break
+    return stored_rank(
+        candidate.metrics, family=candidate.family, stored_score=stored
+    )
 
 
 async def _run_tiers(
@@ -243,13 +257,7 @@ async def _run_tiers(
 
         passed = [c for c in active if _passed_tier(c)]
 
-        def score_of(c: Candidate) -> float:
-            for t in reversed(c.tier_history):
-                if t.tier == tier and t.score is not None:
-                    return t.score
-            return 0.0
-
-        passed.sort(key=score_of, reverse=True)
+        passed.sort(key=lambda c: candidate_keep_score(c, tier), reverse=True)
         active = passed[:keep]
         for c in active:
             c.status = "active"

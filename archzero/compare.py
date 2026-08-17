@@ -8,7 +8,7 @@ from typing import Any
 from archzero.config import FactoryConfig
 from archzero.metrics.elimination import compute_elimination
 from archzero.models import Tier, Verdict
-from archzero.sim.headlines import candidate_headlines, headlines_text
+from archzero.sim.headlines import candidate_headlines, headlines_text, stored_rank
 from archzero.store.db import Store
 
 
@@ -48,7 +48,11 @@ def _survivors(store: Store, campaign_id: str) -> int:
 def _survivor_headlines(store: Store, campaign_id: str, n: int = 3) -> list[dict[str, Any]]:
     cands = [c for c in store.list_candidates(campaign_id=campaign_id) if c.status == "active"]
     cands.sort(
-        key=lambda c: (c.last_tier().score if c.last_tier() and c.last_tier().score else 0),
+        key=lambda c: stored_rank(
+            c.metrics,
+            family=c.family,
+            stored_score=(c.last_tier().score if c.last_tier() else None),
+        ),
         reverse=True,
     )
     return [

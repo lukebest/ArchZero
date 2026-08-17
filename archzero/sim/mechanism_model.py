@@ -241,3 +241,36 @@ def report_magic_gap(model_reduction: float | None, sim_reduction: float | None)
     if model_reduction is None or sim_reduction is None:
         return None
     return magic_gap(float(model_reduction), float(sim_reduction))
+
+
+_GAP_METRIC = {
+    "cache": "miss_reduction",
+    "generic": "miss_reduction",
+    "noc": "goodput",
+    "dataflow": "pe_utilization",
+    "wafer": "die_to_die_bw",
+}
+
+
+def domain_magic_gap(
+    candidate_metrics: dict | None,
+    sim_metrics: dict | None,
+    domain: str,
+) -> tuple[float | None, str | None]:
+    """Compare the same domain quantity across Tier2 and Tier3.
+
+    Cache still uses miss_reduction. Off-cache must not silently skip the
+    check just because MPKI is absent — that hid T2/T3 inconsistency on NoC.
+    """
+    key = _GAP_METRIC.get(domain)
+    if not key:
+        return None, None
+    cand = candidate_metrics or {}
+    sim = sim_metrics or {}
+    model = cand.get(f"t2_{key}")
+    if model is None:
+        model = cand.get(key)
+    measured = sim.get(key)
+    if model is None or measured is None:
+        return None, None
+    return report_magic_gap(float(model), float(measured)), key

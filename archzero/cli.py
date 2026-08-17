@@ -854,6 +854,26 @@ def status_cmd(
                     failed += 1
         table.add_row(tier.value, str(entered), str(passed), str(failed))
     console.print(table)
+    from archzero.sim.headlines import headlines_text, metrics_domain
+
+    if cands:
+        ctable = Table(title="Candidates")
+        ctable.add_column("id")
+        ctable.add_column("title")
+        ctable.add_column("family")
+        ctable.add_column("domain")
+        ctable.add_column("headlines")
+        ctable.add_column("status")
+        for c in cands:
+            ctable.add_row(
+                c.id,
+                (c.title or "")[:40],
+                c.family or "",
+                metrics_domain(c.metrics, c.family),
+                headlines_text(c.metrics, family=c.family) or "—",
+                c.status,
+            )
+        console.print(ctable)
     usage = store.usage_totals(campaign)
     if usage:
         console.print(f"usage pools: {usage}")
@@ -877,13 +897,20 @@ def show_cmd(
     console.print(f"id={c.id}  problem={c.problem_id}")
     if c.clause_refs:
         console.print("clauses: " + ", ".join(c.clause_refs))
+    from archzero.sim.headlines import headlines_text, metrics_domain
+
+    domain = metrics_domain(c.metrics, c.family)
+    hl = headlines_text(c.metrics, family=c.family)
+    console.print(f"domain={domain}")
+    if hl:
+        console.print(f"headlines: {hl}")
     console.print("\n[bold]Mechanism[/bold]\n")
     console.print(c.mechanism[:4000] + ("…" if len(c.mechanism) > 4000 else ""))
     if c.tier_history:
         table = Table(title="Tier history")
         table.add_column("tier")
         table.add_column("verdict")
-        table.add_column("score")
+        table.add_column("tier score")
         table.add_column("summary")
         for t in c.tier_history:
             table.add_row(

@@ -27,6 +27,7 @@ from archzero.models import (
     TierResult,
     Verdict,
 )
+from archzero.sim.headlines import ranking_score
 from archzero.spec.acc_parse import AcceptanceThresholds, parse_acceptance_thresholds
 from archzero.store.artifacts import ArtifactStore
 
@@ -45,7 +46,7 @@ Write a complete model.py that:
 - SHOULD import from archzero.analytic.domains import noc_model
 - defines run_model() -> dict by calling noc_model("<family>")
   family is one of: packet_switched, request_grant, push_on_pull, presched
-- returned keys MUST include completion_latency, p95_latency, p99_latency, goodput, link_utilization
+- returned keys MUST include completion_latency, p95_latency, p99_latency, goodput, link_utilization, jitter_tolerance
 - do NOT invent predicted_mpki, miss_reduction, or ipc_speedup — those are cache metrics
 - meets_target must be None unless the spec stated a numeric gate
 - is deterministic and has no network I/O
@@ -111,14 +112,27 @@ def code_persona_for(domain: str) -> str:
 
 
 def _headline_score(metrics: dict, th: AcceptanceThresholds) -> float:
-    for key in _DOMAIN_HEADLINE.get(th.domain, ("miss_reduction",)):
-        val = metrics.get(key)
-        if val is not None:
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                continue
-    return float(metrics.get("miss_reduction") or 0.0)
+    """Higher-is-better sort key. Do not use p99 — larger latency is worse."""
+    scored = ranking_score(metrics, domain=th.domain)
+    if scored is not None:
+        return scored
+    if th.domain in ("cache", "generic"):
+        return float(metrics.get("miss_reduction") or 0.0)
+    return 0.0
+
+
+def _tier2_result_score(
+    metrics: dict, th: AcceptanceThresholds, data: dict | None
+) -> float:
+    ranked = _headline_score(metrics, th)
+    if th.domain not in ("cache", "generic"):
+        return ranked
+    if data is not None and data.get("score") is not None:
+        try:
+            return float(data["score"])
+        except (TypeError, ValueError):
+            pass
+    return ranked
 
 
 def _sanitize_domain_metrics(
@@ -392,7 +406,7 @@ async def _run_single_tier2_attempt(
 
     return Tier2RunResult(
         verdict=verdict,
-        score=float(data.get("score") or _headline_score(metrics, th)),
+        score=_tier2_result_score(metrics, th, data),
         summary=str(data.get("summary") or ""),
         metrics={"model": metrics},
         insight=data,

@@ -26,6 +26,14 @@ def lint_acceptance(pp: ProblemPackage) -> list[str]:
             f"{spec.note or '尚未实现'}"
         )
 
+    if th.domain == "wafer" and any(
+        mid in th.unmeasurable_metrics
+        for mid in ("yield_redundancy", "thermal_density")
+    ):
+        issues.append(
+            "晶圆领域：本仓库只测织物 hop / die-to-die BW；良率与热密度没有模型，漏斗不会用 hop/d2d 冒充它们。"
+        )
+
     if th.report_only:
         measured = ", ".join(th.measurable_performance) or "—"
         issues.append(

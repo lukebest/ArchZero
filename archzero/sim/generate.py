@@ -8,6 +8,7 @@ that can be audited and self-tested offline.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import textwrap
@@ -193,6 +194,14 @@ def _selftest_ok(metrics: dict[str, Any]) -> bool:
             pass
     if metrics.get("goodput") is not None or metrics.get("p99_latency") is not None:
         return True
+    try:
+        jt = metrics.get("jitter_tolerance")
+        if jt is not None:
+            val = float(jt)
+            if math.isfinite(val) and val > 0:
+                return True
+    except (TypeError, ValueError):
+        pass
     if "pe_utilization" in metrics:
         try:
             if 0.0 <= float(metrics["pe_utilization"]) <= 1.0:
@@ -204,6 +213,13 @@ def _selftest_ok(metrics: dict[str, Any]) -> bool:
         or metrics.get("fabric_hop_latency") is not None
     ):
         return True
+    if "coverage" in metrics:
+        try:
+            val = float(metrics["coverage"])
+            if math.isfinite(val) and 0.0 <= val <= 1.0:
+                return True
+        except (TypeError, ValueError):
+            pass
     return False
 
 

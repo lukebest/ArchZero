@@ -114,9 +114,16 @@ def test_noc_specs_declare_latency_metrics_that_are_now_measurable():
     th = parse_acceptance_thresholds(_load("noc_low_tail_collectives"))
     assert "p99_latency" in th.measurable_performance
     assert "goodput" in th.measurable_performance
-    # Coverage / jitter still have no evaluator.
-    assert "jitter_tolerance" in th.unmeasurable_metrics
-    assert "coverage" in th.unmeasurable_metrics
+    assert "jitter_tolerance" not in th.unmeasurable_metrics
+    assert (
+        "jitter_tolerance" in th.measurable_declared
+        or "jitter_tolerance" in th.measurable_performance
+    )
+    assert "coverage" not in th.unmeasurable_metrics
+    assert (
+        "coverage" in th.measurable_declared
+        or "coverage" in th.measurable_performance
+    )
     assert "magic_gap" in th.declared_metrics
     assert "magic_gap" not in th.unmeasurable_metrics
     assert th.from_spec("max_magic_gap")
@@ -145,7 +152,7 @@ def test_as_dict_carries_provenance_for_reports_and_ui():
     d = th.as_dict()
     assert d["domain"] == "noc"
     assert "min_miss_reduction" in d["defaulted"]
-    assert "jitter_tolerance" in d["unmeasurable_metrics"]
+    assert "jitter_tolerance" not in d["unmeasurable_metrics"]
     assert d["report_only"] is True
     assert "p99_latency" in d["measurable_performance"]
     # Legacy consumers still find the four numbers.
@@ -159,13 +166,27 @@ def test_as_dict_carries_provenance_for_reports_and_ui():
 def test_lint_acceptance_flags_remaining_gaps_and_report_only():
     issues = lint_acceptance(_load("noc_low_tail_collectives"))
     joined = "\n".join(issues)
-    assert "jitter_tolerance" in joined
+    gap_issues = [i for i in issues if "没有评估器" in i]
+    assert not any("jitter_tolerance" in i for i in gap_issues)
+    assert not any("coverage" in i for i in gap_issues)
     assert "report-only" in joined
     assert "strict_acc" not in joined
 
 
 def test_lint_acceptance_is_quiet_for_the_cache_demo():
     assert lint_acceptance(_load("demo")) == []
+
+
+def test_lint_wafer_explains_yield_thermal_are_not_fabric_metrics(tmp_path):
+    path = scaffold_unmeasurable_probe(
+        title="wafer clamp probe",
+        out_dir=tmp_path,
+    )
+    issues = lint_acceptance(load_problem_package(path))
+    joined = "\n".join(issues)
+    assert "yield_redundancy" in joined or "良率" in joined
+    assert "热" in joined or "thermal" in joined
+    assert "hop" in joined.lower() or "die-to-die" in joined or "织物" in joined
 
 
 def test_structural_lint_still_passes_for_noc_specs():

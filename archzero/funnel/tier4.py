@@ -20,9 +20,13 @@ from archzero.models import (
     Verdict,
 )
 from archzero.sim.backend import SimRequest
+from archzero.sim.headlines import ranking_score
+from archzero.sim.mechanism_model import domain_magic_gap
 from archzero.sim.metrics import SimMetrics
 from archzero.sim.registry import resolve_backend_for_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
+
+_SOFT_FALLBACK_BACKENDS = frozenset({"stub", "directed", "noc", "dataflow", "wafer"})
 
 JUDGE_PERSONA = """你是体系结构漏斗的仿真终审。
 根据验收条款与仿真指标裁定 pass/fail。
@@ -46,6 +50,21 @@ def _parse_json(text: str) -> dict:
             except json.JSONDecodeError:
                 pass
         return {"verdict": "fail", "summary": text[:500], "score": 0.0}
+
+
+def _tier4_score(
+    sim_metrics: dict,
+    data: dict | None,
+    *,
+    family: str | None,
+    domain: str,
+) -> float | None:
+    if data is not None and data.get("score") is not None:
+        try:
+            return float(data["score"])
+        except (TypeError, ValueError):
+            pass
+    return ranking_score(sim_metrics, family=family, domain=domain)
 
 
 async def evaluate_tier4(
@@ -80,6 +99,12 @@ async def evaluate_tier4(
         )
     )
     candidate.metrics.update({f"t4_{k}": v for k, v in sim.metrics.items()})
+    gap, gap_metric = domain_magic_gap(
+        candidate.metrics, sim.metrics, th.domain
+    )
+    if gap is not None:
+        candidate.metrics["t4_magic_gap"] = gap
+        candidate.metrics["t4_magic_gap_metric"] = gap_metric
 
     evidence = EvidenceLevel.STUB
     ev = str(sim.metrics.get("evidence") or "")
@@ -92,17 +117,18 @@ async def evaluate_tier4(
     if ev == "directed":
         evidence = EvidenceLevel.SIM
 
-    if sim.unavailable and cfg.funnel.strict_evidence and backend_name not in {
-        "stub",
-        "directed",
-        "noc",
-    }:
+    if sim.unavailable and cfg.funnel.strict_evidence and backend_name not in _SOFT_FALLBACK_BACKENDS:
         result = TierResult(
             tier=Tier.T4,
             verdict=Verdict.UNAVAILABLE,
-            score=float(sim.metrics.get("miss_reduction") or 0),
+            score=_tier4_score(sim.metrics, None, family=candidate.family, domain=th.domain),
             summary=f"{sim.backend}: UNAVAILABLE under strict_evidence",
-            metrics={**sim.metrics, "thresholds": th.as_dict()},
+            metrics={
+                **sim.metrics,
+                "thresholds": th.as_dict(),
+                "magic_gap": gap,
+                "magic_gap_metric": gap_metric,
+            },
             evidence=EvidenceLevel.STUB,
             clause_refs=candidate.clause_refs,
         )
@@ -114,11 +140,15 @@ async def evaluate_tier4(
     acc = "\n".join(
         f"{c.id}: {c.text}" for c in problem.clauses if c.id.startswith("ACC")
     )
+    gap_line = ""
+    if gap is not None:
+        gap_line = f"\nMAGIC GAP (T2 vs this suite, metric={gap_metric}): {gap}\n"
     ctx = (
         f"PROBLEM: {problem.title}\nACCEPTANCE:\n{acc}\n\n"
         f"PARSED THRESHOLDS:\n{json.dumps(th.as_dict(), indent=2)}\n\n"
         f"CANDIDATE: {candidate.title}\n"
         f"SIM METRICS:\n{json.dumps(sim.metrics, indent=2)}\n"
+        f"{gap_line}"
         f"backend={sim.backend} unavailable_flag={sim.unavailable} evidence={evidence.value}"
     )
     try:
@@ -132,8 +162,10 @@ async def evaluate_tier4(
             {k: v for k, v in sim.metrics.items() if k in known}
         )
         outcome = metrics_obj.apply_gates(th.spec_gates())
-        reduction = float(metrics_obj.miss_reduction or metrics_obj.goodput or 0)
-        if backend_name in {"stub", "directed", "noc"}:
+        scored = ranking_score(
+            sim.metrics, family=candidate.family, domain=th.domain
+        )
+        if backend_name in _SOFT_FALLBACK_BACKENDS:
             ok = sim.ok and outcome.ok
             data = {
                 "verdict": "pass" if ok else "fail",
@@ -141,22 +173,39 @@ async def evaluate_tier4(
                     f"judge fallback ({backend_name}): {exc}"
                     + ("" if outcome.adjudicated else " [report-only]")
                 ),
-                "score": reduction,
+                "score": scored,
             }
         else:
             data = {
                 "verdict": "fail",
                 "summary": f"judge error (fail-closed): {exc}",
-                "score": reduction,
+                "score": scored,
             }
 
+    gap_fail = (
+        gap is not None
+        and th.from_spec("max_magic_gap")
+        and gap > th.max_magic_gap
+    )
     verdict = Verdict.PASS if str(data.get("verdict")).lower() == "pass" else Verdict.FAIL
+    summary = str(data.get("summary") or "")
+    if gap_fail:
+        verdict = Verdict.FAIL
+        summary = (
+            f"magic_gap {gap:.3f} ({gap_metric}) > ACC max {th.max_magic_gap:.3f}"
+            + (f"; {summary}" if summary else "")
+        )
     result = TierResult(
         tier=Tier.T4,
         verdict=verdict,
-        score=float(data.get("score") or sim.metrics.get("miss_reduction") or 0),
-        summary=str(data.get("summary") or ""),
-        metrics=sim.metrics,
+        score=_tier4_score(sim.metrics, data, family=candidate.family, domain=th.domain),
+        summary=summary,
+        metrics={
+            **sim.metrics,
+            "magic_gap": gap,
+            "magic_gap_metric": gap_metric,
+            "thresholds": th.as_dict(),
+        },
         evidence=evidence,
         clause_refs=list(data.get("clause_refs") or candidate.clause_refs),
     )

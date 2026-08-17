@@ -7,7 +7,7 @@ from pathlib import Path
 from archzero.config import FactoryConfig
 from archzero.funnel.taxonomy import summarize_failures
 from archzero.models import Tier, Verdict
-from archzero.sim.headlines import headlines_text
+from archzero.sim.headlines import headlines_text, stored_rank
 from archzero.store.db import Store
 
 
@@ -102,7 +102,11 @@ def build_report(cfg: FactoryConfig, campaign_id: str | None = None) -> str:
         # Top survivors
         survivors = [c for c in cands if c.status == "active"]
         survivors.sort(
-            key=lambda c: (c.last_tier().score if c.last_tier() and c.last_tier().score else 0),
+            key=lambda c: stored_rank(
+                c.metrics,
+                family=c.family,
+                stored_score=(c.last_tier().score if c.last_tier() else None),
+            ),
             reverse=True,
         )
         lines.append("### Active / surviving candidates")
@@ -114,7 +118,7 @@ def build_report(cfg: FactoryConfig, campaign_id: str | None = None) -> str:
             lines.append(
                 f"- `{c.id}` **{c.title}** ({c.family}) "
                 f"last={lt.tier.value if lt else '—'} "
-                f"score={lt.score if lt else '—'}{extra}"
+                f"tier_score={lt.score if lt else '—'}{extra}"
             )
         if not survivors:
             lines.append("- (none)")
