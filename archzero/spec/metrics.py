@@ -147,7 +147,7 @@ METRIC_SPECS: tuple[MetricSpec, ...] = (
         unit="cycles",
         direction=LOWER_IS_BETTER,
         domain=NOC,
-        aliases=("completion latency", "完成时延", "完成时间", "端到端时延"),
+        aliases=("completion latency", "makespan", "完成时延", "完成时间", "端到端时延"),
         evaluators=("analytic", "sim"),
         note="Produced by the analytic NoC backend (archzero.sim.noc).",
     ),

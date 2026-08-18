@@ -71,6 +71,12 @@ def test_alias_matching_is_word_boundary_aware():
     assert "miss_reduction" not in hits
 
 
+def test_makespan_alias_is_completion_latency():
+    hits = {m.id for m in detect_metrics("minimize makespan vs baseline")}
+    assert "completion_latency" in hits
+    assert "miss_reduction" not in hits
+
+
 def test_infer_domain_from_clause_text():
     assert infer_domain("report p99 completion latency and goodput vs baseline") == "noc"
     assert infer_domain("predicted MPKI reduction with DRAM bandwidth held flat") == "cache"
@@ -94,7 +100,10 @@ def test_cache_demo_thresholds_all_come_from_the_spec():
     assert th.unmeasurable_metrics == ()
 
 
-@pytest.mark.parametrize("name", ["noc_request_grant", "noc_low_tail_collectives"])
+@pytest.mark.parametrize(
+    "name",
+    ["noc_request_grant", "noc_low_tail_collectives", "dual-bufferless-ring-noc"],
+)
 def test_noc_specs_are_not_silently_graded_as_cache(name):
     th = parse_acceptance_thresholds(_load(name))
     assert th.domain == "noc"
@@ -108,6 +117,19 @@ def test_noc_specs_are_not_silently_graded_as_cache(name):
     assert th.report_only
     assert th.spec_gates() == []
     assert "p99_latency" in th.measurable_performance or "completion_latency" in th.measurable_performance
+
+
+def test_dual_bufferless_ring_declares_makespan_as_completion_latency():
+    th = parse_acceptance_thresholds(_load("dual-bufferless-ring-noc"))
+    assert th.domain == "noc"
+    assert "completion_latency" in th.measurable_performance
+    assert "magic_gap" in th.declared_metrics
+    assert th.from_spec("max_magic_gap")
+    assert not th.from_spec("min_miss_reduction")
+    issues = lint_acceptance(_load("dual-bufferless-ring-noc"))
+    joined = "\n".join(issues)
+    assert "report-only" in joined
+    assert "min_miss_reduction" not in joined
 
 
 def test_noc_specs_declare_latency_metrics_that_are_now_measurable():
@@ -191,7 +213,11 @@ def test_lint_wafer_explains_yield_thermal_are_not_fabric_metrics(tmp_path):
 
 def test_structural_lint_still_passes_for_noc_specs():
     """Ungradable is not the same as malformed; registration must stay allowed."""
-    for name in ("noc_request_grant", "noc_low_tail_collectives"):
+    for name in (
+        "noc_request_grant",
+        "noc_low_tail_collectives",
+        "dual-bufferless-ring-noc",
+    ):
         assert lint_package(_load(name)) == []
 
 

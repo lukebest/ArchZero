@@ -7,7 +7,7 @@ open_questions:
   - Can plane selection or direction choice reduce hotspots without adding buffers?
 decisions: []
 workload: "All-to-all AI-core → memory HA random-uniform reads (request + response)"
-domain: interconnection_network
+domain: "interconnect / NoC"
 ---
 
 # Dual full bufferless rings — AI-core ↔ memory HA all-to-all makespan
@@ -56,9 +56,9 @@ Unless otherwise stated in a campaign, treat destinations as i.i.d. uniform over
 
 `refines: CTX-003`
 
-Primary figure of merit is **makespan**: wall-clock (or cycle) time until the **last response flit** of the evaluated traffic batch has been **ejected at its destination AI core**.
+Primary figure of merit is **completion latency** (**makespan**): wall-clock (or cycle) time until the **last response flit** of the evaluated traffic batch has been **ejected at its destination AI core**.
 
-Lower makespan is better. Report makespan in cycles (or equivalent discrete time units of the chosen model).
+Lower completion latency is better. Report completion latency / makespan in cycles (or equivalent discrete time units of the chosen model).
 
 ### REQ-001 — Completeness
 
@@ -76,7 +76,7 @@ Evaluations shall respect the dual full bufferless ring geometry: 20 nodes, even
 
 `refines: CTX-004`
 
-Under the default traffic (uniform core→HA reads, R=4 unless swept), the proposed policy shall **minimize makespan** relative to a stated baseline (e.g., random plane + shortest-path direction, or dimension-order equivalent on each ring). Report absolute makespan and speedup vs baseline.
+Under the default traffic (uniform core→HA reads, R=4 unless swept), the proposed policy shall **minimize completion latency** (batch **makespan**) relative to a stated baseline (e.g., random plane + shortest-path direction, or dimension-order equivalent on each ring). Report absolute completion latency and speedup vs baseline.
 
 ### NNG-001 — Non-goals
 
@@ -97,17 +97,17 @@ An analytic or discrete-event model (Tier2 / directed Tier3) shall:
 
 1. Encode the dual-plane bufferless ring and 80 directed segments.
 2. Drive all-to-all uniform core→HA reads with request = 1 flit, response = R flits (default R=4).
-3. Report **makespan** = time of last response-flit eject at a core.
+3. Report **completion latency** / **makespan** = time of last response-flit eject at a core.
 4. Compare against a documented baseline policy; state assumptions (injection rate, serialization at shared plane ports, conflict model).
 
-Magic Gap between analytic prediction and any higher-fidelity sim ≤ **2×** on makespan for the same traffic seed set, when both are available.
+Magic Gap between analytic prediction and any higher-fidelity sim ≤ 2× on completion latency for the same traffic seed set, when both are available.
 
 ### ACC-002 — Parameter sweep (optional but preferred)
 
 `refines: REQ-003, CTX-003`
 `measurable: true`
 
-When claiming robustness, report makespan vs **R ∈ {1,2,4,8,16}** (or a stated subset) under identical topology and routing family. Default single-point claim uses **R = 4**.
+When claiming robustness, report completion latency / makespan vs **R ∈ {1,2,4,8,16}** (or a stated subset) under identical topology and routing family. Default single-point claim uses **R = 4**.
 
 ### ACC-003 — Evidence hygiene
 
