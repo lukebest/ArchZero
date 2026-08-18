@@ -25,16 +25,25 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
+knobs = {}
 kp = ROOT / "sim_knobs.json"
 if kp.is_file():
     knobs.update(json.loads(kp.read_text(encoding="utf-8")))
 
 # Placeholder stats for dry harness validation (not architectural evidence).
+# Do not invent a 12% MPKI cut when knobs omitted the key.
 baseline_mpki = 8.0
-reduction = float(knobs.get("miss_reduction", 0.12))
-mpki = baseline_mpki * (1.0 - reduction)
-ipc = 1.5 * (1.0 + 0.2 * reduction)
+raw = knobs.get("miss_reduction")
+if raw is None:
+    reduction = None
+    mpki = baseline_mpki
+    ipc = 1.5
+    tag = "archzero_scaffold=1 no_invented_miss_reduction"
+else:
+    reduction = float(raw)
+    mpki = baseline_mpki * (1.0 - reduction)
+    ipc = 1.5 * (1.0 + 0.2 * reduction)
+    tag = f"archzero_scaffold=1 miss_reduction={reduction}"
 
 (ROOT / "baseline_stats.txt").write_text(
     f"system.cpu.ipc {1.5}\\n"
@@ -46,10 +55,10 @@ ipc = 1.5 * (1.0 + 0.2 * reduction)
     f"system.cpu.ipc {ipc}\\n"
     f"system.l2.overall_miss_rate::total {mpki / 1000.0}\\n"
     f"simInsts 5000000\\n"
-    f"# archzero_scaffold=1 miss_reduction={reduction}\\n",
+    f"# {tag}\\n",
     encoding="utf-8",
 )
-print(f"archzero gem5 harness scaffold wrote stats (reduction={reduction})")
+print(f"archzero gem5 harness scaffold wrote stats ({tag})")
 '''
 
 _HARNESS_INAPPLICABLE = '''\
@@ -115,7 +124,9 @@ def write_gem5_harness(
             "# gem5 harness scaffold\n\n"
             "- Script: `run_gem5.py`\n"
             "- Replace with a real gem5 SE/FS driver that emits `stats.txt`.\n"
-            "- Placeholder stats are **not** architectural evidence.\n",
+            "- Placeholder stats are **not** architectural evidence.\n"
+            "- Missing `miss_reduction` in knobs writes an iso-baseline "
+            "placeholder; it does not invent a 12% cut.\n",
             encoding="utf-8",
         )
     return {

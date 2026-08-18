@@ -41,6 +41,21 @@ def test_generate_replacement_and_bypass(tmp_path):
     assert r.selftest_ok and b.selftest_ok
 
 
+def test_generate_prefetch_without_knobs_does_not_invent_018(tmp_path):
+    g = generate_dedicated_sim(
+        tmp_path / "empty",
+        title="Filtered prefetch",
+        mechanism="256-entry dead-block filter degree 2",
+        knobs={},
+        family="prefetch",
+    )
+    assert "miss_reduction" not in g.metrics
+    assert "18%" in (g.metrics.get("note") or "")
+    src = g.path.read_text(encoding="utf-8")
+    assert "0.18" not in src
+    assert g.selftest_ok
+
+
 def test_weekly_includes_elimination(tmp_cfg, demo_problem):
     store = Store(tmp_cfg.db_path)
     store.save_problem(demo_problem)
@@ -85,3 +100,26 @@ def test_generate_request_grant_selftest(tmp_path):
     assert g.metrics.get("p99_latency") is not None or g.metrics.get("goodput") is not None
     assert "miss_reduction" not in g.metrics or g.metrics.get("miss_reduction") is None
 
+def test_generate_unknown_family_does_not_invent_mpki(tmp_path):
+    g = generate_dedicated_sim(
+        tmp_path,
+        title="Unclassified widget",
+        mechanism="A novel structure with no cache or NoC vocabulary.",
+        knobs={},
+        family="other",
+    )
+    assert "miss_reduction" not in g.metrics
+    assert "invented miss_reduction" in (g.metrics.get("note") or "")
+    src = g.path.read_text(encoding="utf-8")
+    assert "miss_reduction" not in src or "no invented miss_reduction" in src
+    # written knobs still pass through
+    g2 = generate_dedicated_sim(
+        tmp_path / "with-goodput",
+        title="Unclassified widget",
+        mechanism="A novel structure with no cache or NoC vocabulary.",
+        knobs={"goodput": 0.42},
+        family="other",
+    )
+    assert g2.metrics.get("goodput") == 0.42
+    assert "miss_reduction" not in g2.metrics
+    assert g2.selftest_ok

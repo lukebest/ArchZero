@@ -100,7 +100,7 @@ class FakeLLM:
                 (cwd / "sim_knobs.json").write_text(knobs_blob, encoding="utf-8")
             else:
                 (cwd / "sim_knobs.json").write_text(
-                    '{"miss_reduction": 0.18, "extra_bw": 0.02, "area": 0.25}',
+                    '{"family": "prefetch", "domain": "cache"}',
                     encoding="utf-8",
                 )
         if "design.py" in instruction.lower() and not (cwd / "design.py").exists():

@@ -40,15 +40,7 @@ class DirectedSimBackend(SimBackend):
         metrics: SimMetrics = simulate_mechanism(
             params, candidate_id=req.candidate_id, suite=req.suite
         )
-        # Apply ACC thresholds from meta when present
-        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
-        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
-        area_budget = req.meta.get("area_budget_mm2")
-        ok = metrics.gate_ok(
-            min_reduction=min_red,
-            max_bw=max_bw,
-            area_budget_mm2=float(area_budget) if area_budget is not None else None,
-        )
+        ok = metrics.meta_gate_ok(req.meta)
         log_path = req.workdir / f"sim_directed_{req.suite}.json"
         log_path.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
         return SimResult(

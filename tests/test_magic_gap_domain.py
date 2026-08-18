@@ -35,6 +35,26 @@ def test_domain_gap_absent_off_cache_is_none_not_zero():
     assert key is None
 
 
+def test_domain_gap_generic_prefers_goodput_over_leaked_mpki():
+    gap, key = domain_magic_gap(
+        {"t2_goodput": 0.80, "t2_miss_reduction": 0.22},
+        {"goodput": 0.40, "miss_reduction": 0.01},
+        "generic",
+    )
+    assert key == "goodput"
+    assert gap == pytest.approx(abs(0.80 - 0.40) / 0.40)
+
+
+def test_domain_gap_generic_without_domain_metric_can_use_mpki():
+    gap, key = domain_magic_gap(
+        {"t2_miss_reduction": 0.30},
+        {"miss_reduction": 0.15},
+        "generic",
+    )
+    assert key == "miss_reduction"
+    assert gap == pytest.approx(1.0)
+
+
 def test_domain_gap_cache_still_uses_mpki():
     gap, key = domain_magic_gap(
         {"t2_miss_reduction": 0.30},

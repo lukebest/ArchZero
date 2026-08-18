@@ -128,8 +128,10 @@ class MapElitesBackend(EvolutionBackend):
                         "source_failure_ids": [f.id for f in parent.failures],
                     }
                     if domain == "cache":
-                        metrics["miss_reduction"] = knobs.get("miss_reduction", 0.12)
-                        metrics["area"] = knobs.get("area", 0.3)
+                        if knobs.get("miss_reduction") is not None:
+                            metrics["miss_reduction"] = knobs.get("miss_reduction")
+                        if knobs.get("area") is not None:
+                            metrics["area"] = knobs.get("area")
                     child = Candidate(
                         problem_id=parent.problem_id,
                         title=str(data.get("title") or f"{parent.title} mut{gen}"),
@@ -152,11 +154,11 @@ class MapElitesBackend(EvolutionBackend):
                         scored = {}
                     child.metrics.update({f"t2_{k}": v for k, v in scored.items()})
                     if domain == "cache":
-                        child.metrics["t2_miss_reduction"] = float(
-                            scored.get("miss_reduction")
-                            or knobs.get("miss_reduction")
-                            or 0
-                        )
+                        red = scored.get("miss_reduction")
+                        if red is None:
+                            red = knobs.get("miss_reduction")
+                        if red is not None:
+                            child.metrics["t2_miss_reduction"] = float(red)
                     child.metrics["evolved_gen"] = gen
                     return child
 

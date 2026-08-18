@@ -86,6 +86,13 @@ def score_variant(domain: str, family: str, knobs: dict[str, Any]) -> dict[str, 
 
     from archzero.analytic.core import MechanismEffect, Workload, score_mechanism
 
+    raw = knobs.get("miss_reduction")
+    if raw is None:
+        return {
+            "note": "cache evolve: no miss_reduction in knobs; not a 12% default",
+        }
+    extra = knobs.get("extra_bw")
+    area = knobs.get("area")
     return score_mechanism(
         Workload(
             name="evolve-proxy",
@@ -95,8 +102,8 @@ def score_variant(domain: str, family: str, knobs: dict[str, Any]) -> dict[str, 
             peak_bandwidth_gbps=50.0,
         ),
         MechanismEffect(
-            miss_reduction_frac=float(knobs.get("miss_reduction") or 0.12),
-            extra_bw_frac=float(knobs.get("extra_bw") or 0.02),
-            area_mm2=float(knobs.get("area") or 0.3),
+            miss_reduction_frac=float(raw),
+            extra_bw_frac=float(extra) if extra is not None else 0.0,
+            area_mm2=float(area) if area is not None else 0.0,
         ),
     )

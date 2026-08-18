@@ -63,41 +63,59 @@ class StubSimBackend(SimBackend):
                 backend="stub",
             )
 
-        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
-        knobs.update(loaded)
-
+        knobs = dict(loaded)
         baseline_mpki = 8.0 + rng.random()
         baseline_ipc = 1.4 + 0.2 * rng.random()
-        reduction = float(knobs.get("miss_reduction", 0.12))
-        reduction = max(0.0, min(0.9, reduction + rng.uniform(-0.03, 0.03)))
-        mpki = baseline_mpki * (1.0 - reduction)
-        ipc = baseline_ipc * (1.0 + 0.25 * reduction)
-        bw_delta = float(knobs.get("extra_bw", 0.02))
         cycles = 10_000_000 if req.suite == "full" else 1_000_000
+        extra = knobs.get("extra_bw")
+        if extra is None:
+            extra = knobs.get("bw_delta_frac")
+        try:
+            bw_delta = float(extra) if extra is not None else None
+        except (TypeError, ValueError):
+            bw_delta = None
+        area_raw = knobs.get("area_mm2", knobs.get("area"))
+        try:
+            area = float(area_raw) if area_raw is not None else None
+        except (TypeError, ValueError):
+            area = None
 
-        metrics = SimMetrics(
-            evidence="stub",
-            backend="stub",
-            suite=req.suite,
-            baseline_mpki=baseline_mpki,
-            mpki=mpki,
-            miss_reduction=reduction,
-            ipc=ipc,
-            bw_delta_frac=bw_delta,
-            area_mm2=float(knobs.get("area", 0.3)),
-            cycles=cycles,
-            note="synthetic stub — not architectural evidence",
-        )
+        raw = knobs.get("miss_reduction")
+        if raw is None:
+            metrics = SimMetrics(
+                evidence="stub",
+                backend="stub",
+                suite=req.suite,
+                baseline_mpki=baseline_mpki,
+                mpki=baseline_mpki,
+                miss_reduction=None,
+                ipc=baseline_ipc,
+                bw_delta_frac=bw_delta,
+                area_mm2=area,
+                cycles=cycles,
+                note=(
+                    "synthetic stub — no miss_reduction in knobs; "
+                    "iso-baseline, not a 12% cut"
+                ),
+            )
+        else:
+            reduction = max(0.0, min(0.9, float(raw) + rng.uniform(-0.03, 0.03)))
+            metrics = SimMetrics(
+                evidence="stub",
+                backend="stub",
+                suite=req.suite,
+                baseline_mpki=baseline_mpki,
+                mpki=baseline_mpki * (1.0 - reduction),
+                miss_reduction=reduction,
+                ipc=baseline_ipc * (1.0 + 0.25 * reduction),
+                bw_delta_frac=bw_delta,
+                area_mm2=area,
+                cycles=cycles,
+                note="synthetic stub — not architectural evidence",
+            )
         log_path = req.workdir / f"sim_{req.suite}.json"
         log_path.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
-        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
-        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
-        area_budget = req.meta.get("area_budget_mm2")
-        ok = metrics.gate_ok(
-            min_reduction=min_red,
-            max_bw=max_bw,
-            area_budget_mm2=float(area_budget) if area_budget is not None else None,
-        )
+        ok = metrics.meta_gate_ok(req.meta)
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

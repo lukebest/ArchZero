@@ -35,8 +35,16 @@ def run_sim( knobs: dict ) -> dict:
     entries = int(knobs.get("table_entries", {entries}))
     degree = int(knobs.get("prefetch_degree", {degree}))
     acc = float(knobs.get("filter_accuracy", {acc}))
-    base = float(knobs.get("miss_reduction", {base}))
     extra_bw = float(knobs.get("extra_bw", {bw}))
+    raw = knobs.get("miss_reduction")
+    if raw is None:
+        return {{
+            "evidence": "dedicated",
+            "backend": "dedicated-prefetch",
+            "family": "prefetch",
+            "note": "no miss_reduction in knobs; not an 18% default",
+        }}
+    base = float(raw)
     pollution = min(0.35, 0.04 * max(0, degree - 1))
     capacity = min(1.0, (entries.bit_length() - 1) / 10.0) if entries > 1 else 0.1
     reduction = max(0.0, min(0.9, base * acc * (1.0 - pollution) * (0.7 + 0.3 * capacity)))
@@ -57,8 +65,16 @@ def run_sim( knobs: dict ) -> dict:
     """Replacement event-model simulator (generated)."""
     entries = int(knobs.get("table_entries", {entries}))
     hist = int(knobs.get("history_len", {hist}))
-    base = float(knobs.get("miss_reduction", {base}))
     extra_bw = float(knobs.get("extra_bw", {bw}))
+    raw = knobs.get("miss_reduction")
+    if raw is None:
+        return {{
+            "evidence": "dedicated",
+            "backend": "dedicated-replacement",
+            "family": "replacement",
+            "note": "no miss_reduction in knobs; not an 18% default",
+        }}
+    base = float(raw)
     hist_factor = min(1.0, hist / 16.0)
     table_factor = min(1.0, entries / 512.0)
     reduction = max(0.0, min(0.9, base * (0.55 + 0.45 * hist_factor * table_factor)))
@@ -77,8 +93,16 @@ _BYPASS_BODY = '''
 def run_sim( knobs: dict ) -> dict:
     """Bypass/writeback event-model simulator (generated)."""
     thr = float(knobs.get("bypass_threshold", {thr}))
-    base = float(knobs.get("miss_reduction", {base}))
     extra_bw = float(knobs.get("extra_bw", {bw}))
+    raw = knobs.get("miss_reduction")
+    if raw is None:
+        return {{
+            "evidence": "dedicated",
+            "backend": "dedicated-bypass",
+            "family": "bypass",
+            "note": "no miss_reduction in knobs; not an 18% default",
+        }}
+    base = float(raw)
     useful = min(1.0, max(0.0, thr))
     reduction = max(0.0, min(0.9, base * (0.4 + 0.6 * useful)))
     bw = max(0.0, extra_bw - 0.01 * useful)
@@ -95,20 +119,48 @@ def run_sim( knobs: dict ) -> dict:
 
 _GENERIC_BODY = '''
 def run_sim( knobs: dict ) -> dict:
-    """Generic mechanism event-model simulator (generated)."""
-    base = float(knobs.get("miss_reduction", {base}))
-    extra_bw = float(knobs.get("extra_bw", {bw}))
-    reduction = max(0.0, min(0.9, base * 0.75))
-    return {{
+    """Unclassified family — copy written knobs; do not invent MPKI."""
+    out = {{
         "evidence": "dedicated",
         "backend": "dedicated-generic",
-        "family": "{family}",
-        "miss_reduction": reduction,
-        "bw_delta_frac": extra_bw,
-        "area_mm2": float(knobs.get("area", 0.25)),
-        "note": "generated dedicated generic event model",
+        "family": str(knobs.get("family") or "{family}"),
+        "note": "unclassified family; no invented miss_reduction",
     }}
+    for key in (
+        "goodput", "p99_latency", "pe_utilization", "reuse_factor",
+        "sram_traffic", "die_to_die_bw", "fabric_hop_latency",
+        "coverage", "jitter_tolerance", "miss_reduction",
+        "bw_delta_frac", "area_mm2",
+    ):
+        raw = knobs.get(key)
+        if raw is None:
+            continue
+        try:
+            out[key] = float(raw)
+        except (TypeError, ValueError):
+            pass
+    return out
 '''
+
+_CACHE_TEMPLATE_FAMILIES = frozenset(
+    {"prefetch", "filter", "streamer", "replacement", "bypass"}
+)
+_PASSTHROUGH_KNOBS = (
+    "goodput",
+    "p99_latency",
+    "pe_utilization",
+    "reuse_factor",
+    "sram_traffic",
+    "die_to_die_bw",
+    "fabric_hop_latency",
+    "coverage",
+    "jitter_tolerance",
+    "miss_reduction",
+    "extra_bw",
+    "bw_delta_frac",
+    "area",
+    "area_mm2",
+)
 
 _NOC_BODY = '''
 def run_sim( knobs: dict ) -> dict:
@@ -161,27 +213,20 @@ def _body_for(params: MechanismParams) -> str:
             entries=params.table_entries,
             degree=params.prefetch_degree,
             acc=params.filter_accuracy,
-            base=params.base_reduction,
             bw=params.extra_bw,
         )
     if fam == "replacement":
         return _REPLACEMENT_BODY.format(
             entries=params.table_entries,
             hist=params.history_len,
-            base=params.base_reduction,
             bw=params.extra_bw,
         )
     if fam == "bypass":
         return _BYPASS_BODY.format(
             thr=params.bypass_threshold,
-            base=params.base_reduction,
             bw=params.extra_bw,
         )
-    return _GENERIC_BODY.format(
-        family=fam,
-        base=params.base_reduction,
-        bw=params.extra_bw,
-    )
+    return _GENERIC_BODY.format(family=fam)
 
 
 def _selftest_ok(metrics: dict[str, Any]) -> bool:
@@ -213,6 +258,8 @@ def _selftest_ok(metrics: dict[str, Any]) -> bool:
         or metrics.get("fabric_hop_latency") is not None
     ):
         return True
+    if "no miss_reduction in knobs" in str(metrics.get("note") or ""):
+        return True
     if "coverage" in metrics:
         try:
             val = float(metrics["coverage"])
@@ -236,6 +283,31 @@ def render_dedicated_sim(params: MechanismParams) -> str:
     )
 
 
+
+def _selftest_payload(params: MechanismParams, knobs: dict[str, Any]) -> dict[str, Any]:
+    """Knobs for the generated script. Unknown families do not get a fake MPKI."""
+    payload: dict[str, Any] = {
+        "table_entries": params.table_entries,
+        "prefetch_degree": params.prefetch_degree,
+        "filter_accuracy": params.filter_accuracy,
+        "history_len": params.history_len,
+        "bypass_threshold": params.bypass_threshold,
+        "family": params.family,
+        "domain": family_domain(params.family),
+    }
+    kind = family_domain(params.family)
+    if kind == CACHE and params.family in _CACHE_TEMPLATE_FAMILIES:
+        if params.reduction_declared:
+            payload["miss_reduction"] = params.base_reduction
+            payload["extra_bw"] = params.extra_bw
+            payload["area"] = params.area_mm2
+        return payload
+    for key in _PASSTHROUGH_KNOBS:
+        if knobs.get(key) is not None:
+            payload[key] = knobs[key]
+    return payload
+
+
 def generate_dedicated_sim(
     workdir: Path,
     *,
@@ -253,18 +325,7 @@ def generate_dedicated_sim(
     path = workdir / "dedicated_sim.py"
     path.write_text(render_dedicated_sim(params), encoding="utf-8")
 
-    payload = {
-        "table_entries": params.table_entries,
-        "prefetch_degree": params.prefetch_degree,
-        "filter_accuracy": params.filter_accuracy,
-        "history_len": params.history_len,
-        "bypass_threshold": params.bypass_threshold,
-        "miss_reduction": params.base_reduction,
-        "extra_bw": params.extra_bw,
-        "area": params.area_mm2,
-        "family": params.family,
-        "domain": family_domain(params.family),
-    }
+    payload = _selftest_payload(params, knobs)
     proc = subprocess.run(
         [sys.executable, str(path), json.dumps(payload)],
         capture_output=True,
@@ -348,6 +409,14 @@ def _llm_persona(family: str) -> str:
             "and/or fabric_hop_latency, plus evidence, backend, family. "
             "Do NOT invent miss_reduction. No network I/O. Deterministic."
         )
+    if family not in _CACHE_TEMPLATE_FAMILIES:
+        return (
+            "You write a small dedicated Python event-model simulator for an "
+            "unclassified mechanism family. Return ONLY a complete dedicated_sim.py "
+            "that defines run_sim(knobs: dict) -> dict with evidence, backend, "
+            "family, and any numeric keys the caller already wrote in knobs. "
+            "Do NOT invent miss_reduction. No network I/O. Deterministic."
+        )
     return (
         "You write a small dedicated Python event-model simulator for one cache "
         "mechanism family. Return ONLY a complete dedicated_sim.py that defines "
@@ -406,24 +475,12 @@ async def generate_dedicated_sim_llm(
         return (text or "").strip()
 
     path = workdir / "dedicated_sim.py"
-    payload = {
-        "table_entries": params.table_entries,
-        "prefetch_degree": params.prefetch_degree,
-        "filter_accuracy": params.filter_accuracy,
-        "history_len": params.history_len,
-        "bypass_threshold": params.bypass_threshold,
-        "miss_reduction": params.base_reduction,
-        "extra_bw": params.extra_bw,
-        "area": params.area_mm2,
-        "family": params.family,
-        "domain": kind,
-    }
+    payload = _selftest_payload(params, knobs or {})
     last_err = ""
     metric_hint = (
         "0<=miss_reduction<=1"
-        if kind == CACHE
-        else "domain keys (p99_latency/goodput or pe_utilization or "
-        "die_to_die_bw/fabric_hop_latency) — do not invent miss_reduction"
+        if kind == CACHE and params.family in _CACHE_TEMPLATE_FAMILIES
+        else "domain keys already present in knobs — do not invent miss_reduction"
     )
     for attempt in range(max_repairs + 1):
         if attempt == 0:

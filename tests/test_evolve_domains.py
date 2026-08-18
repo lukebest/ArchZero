@@ -37,3 +37,9 @@ def test_score_variant_wafer_has_d2d_not_yield():
 def test_score_variant_cache_keeps_miss_reduction():
     scored = score_variant("cache", "prefetch", {"miss_reduction": 0.2})
     assert scored["miss_reduction"] == pytest.approx(0.2)
+
+
+def test_score_variant_cache_without_knobs_does_not_invent_012():
+    scored = score_variant("cache", "prefetch", {})
+    assert "miss_reduction" not in scored
+    assert "12%" in (scored.get("note") or "")

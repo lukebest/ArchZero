@@ -177,6 +177,24 @@ class SimMetrics(BaseModel):
                 return False
         return True
 
+    def meta_gate_ok(self, meta: dict | None) -> bool:
+        """Apply cache gates only when the request actually stated them.
+
+        ``min_miss_reduction or 0.15`` used to invent a 15% MPKI bar on every
+        stub/directed/gem5/ChampSim run, including specs that never declared it.
+        """
+        meta = meta or {}
+        min_red = meta.get("min_miss_reduction")
+        max_bw = meta.get("max_bw_delta_frac")
+        area = meta.get("area_budget_mm2")
+        if min_red is None and max_bw is None and area is None:
+            return True
+        return self.gate_ok(
+            min_reduction=float(min_red) if min_red is not None else 0.0,
+            max_bw=float(max_bw) if max_bw is not None else 1.0,
+            area_budget_mm2=float(area) if area is not None else None,
+        )
+
 
 def geo_mean(values: list[float]) -> float | None:
     vals = [v for v in values if v is not None and v > 0]

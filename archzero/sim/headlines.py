@@ -127,7 +127,10 @@ def ranking_score(
     NoC campaign used to look like an L2 prefetcher that missed its MPKI gate.
     """
     metrics = metrics or {}
-    kind = domain or metrics_domain(metrics, family)
+    if not domain or domain == "generic":
+        kind = metrics_domain(metrics, family)
+    else:
+        kind = domain
     if kind != CACHE and kind in _RANK_KEYS:
         for key in _RANK_KEYS[kind]:
             val = _lookup_metric(metrics, key)

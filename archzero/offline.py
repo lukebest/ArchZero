@@ -14,10 +14,16 @@ from archzero.models import ProblemPackage
 from archzero.sim.families import CACHE, DATAFLOW, NOC, WAFER, family_domain
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 
+# Stated FakeLLM / seed number for specs/demo.md (>=15% MPKI). This is a
+# fixture the demo model *claims*, not a silent default the funnel invents
+# when a real run has no measurement.
+CACHE_DEMO_MISS_REDUCTION = 0.18
+
 _ANALYTIC = {
     CACHE: (
         "```python\ndef run_model():\n"
-        "    return {'predicted_mpki':6.0,'miss_reduction':0.18,"
+        "    return {'predicted_mpki':6.0,"
+        f"'miss_reduction':{CACHE_DEMO_MISS_REDUCTION},"
         "'ipc_speedup':1.05,'meets_target':True}\n```"
     ),
     NOC: (
@@ -105,11 +111,8 @@ def knobs_for(domain: str, family: str | None = None) -> dict[str, Any]:
     fam = family or default_family(domain)
     if domain in {NOC, DATAFLOW, WAFER}:
         return {"family": fam, "domain": domain}
-    out: dict[str, Any] = {
-        "miss_reduction": 0.18,
-        "extra_bw": 0.02,
-        "area": 0.25,
-    }
+    # Cache path: family/domain only. Do not invent an 18% MPKI cut.
+    out: dict[str, Any] = {"domain": CACHE if domain == CACHE else domain}
     if fam:
         out["family"] = fam
     return out

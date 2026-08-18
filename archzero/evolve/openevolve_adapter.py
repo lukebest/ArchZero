@@ -21,6 +21,23 @@ EVAL_KEY = {
     CACHE: "miss_reduction",
 }
 
+_KNOWN_DOMAINS = {CACHE, NOC, DATAFLOW, WAFER, "generic"}
+
+
+def resolve_evolve_domain(domain: str, family: str | None = None) -> str:
+    """Map a possibly-generic domain onto a score key's domain.
+
+    Unknown names must not silently become ``miss_reduction``.
+    """
+    if domain in EVAL_KEY:
+        return domain
+    resolved = family_domain(family)
+    if domain and domain not in _KNOWN_DOMAINS and resolved == CACHE:
+        raise ValueError(
+            f"unknown evolve domain {domain!r}; refusing to default to miss_reduction"
+        )
+    return resolved
+
 
 def evolve_domain(
     cfg: FactoryConfig, campaign_id: str | None, seeds: list[Candidate]
@@ -45,12 +62,13 @@ def evolve_domain(
 
 def seed_program_sources(domain: str, family: str) -> tuple[str, str]:
     """Return (initial_program.py, evaluator.py) text shaped for the domain."""
-    key = EVAL_KEY.get(domain, "miss_reduction")
+    resolved = resolve_evolve_domain(domain, family)
+    key = EVAL_KEY[resolved]
     program = (
         "from archzero.evolve.domains import score_variant\n"
         "\n"
         "def run_model():\n"
-        f"    return score_variant({domain!r}, {family!r}, {{}})\n"
+        f"    return score_variant({resolved!r}, {family!r}, {{}})\n"
     )
     evaluator = (
         "def evaluate(program_path):\n"

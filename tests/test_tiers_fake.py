@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from archzero.llm.fake import FakeLLM
-from archzero.models import Candidate, EvidenceLevel, Tier, Verdict
+from archzero.models import Candidate, EvidenceLevel, TaskClass, Tier, Verdict
 from archzero.sim.parse_champsim import parse_champsim_stdout
 from archzero.sim.parse_gem5 import parse_stats_text
 
@@ -270,3 +270,17 @@ async def test_tier2_verifier_fail_blocks(tmp_cfg, demo_problem):
     out = await evaluate_tier2(tmp_cfg, c, demo_problem, llm)
     assert out.tier_history[-1].verdict == Verdict.FAIL
     assert "verifier" in out.tier_history[-1].summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_fake_llm_cache_knobs_do_not_invent_018(tmp_path):
+    llm = FakeLLM()
+    await llm.work(
+        "You prepare a simulation harness for an architecture mechanism.",
+        "Create sim_knobs.json for the stub adapter.",
+        TaskClass.ANALYTIC,
+        cwd=tmp_path,
+    )
+    knobs = json.loads((tmp_path / "sim_knobs.json").read_text(encoding="utf-8"))
+    assert "miss_reduction" not in knobs
+    assert knobs.get("domain") == "cache"

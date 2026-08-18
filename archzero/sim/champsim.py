@@ -31,7 +31,7 @@ class ChampSimBackend(SimBackend):
         return bool(bin_path and Path(bin_path).exists())
 
     def _load_knobs(self, workdir: Path) -> dict:
-        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
+        knobs: dict = {}
         knob_path = workdir / "sim_knobs.json"
         if knob_path.exists():
             try:
@@ -96,8 +96,7 @@ class ChampSimBackend(SimBackend):
 
         bin_path = Path(self.cfg.sim.champsim_bin)  # type: ignore[arg-type]
         traces = resolve_traces(self.cfg, req.suite)
-        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
-        knobs.update(loaded)
+        knobs = dict(loaded)
         write_champsim_scaffold(
             req.workdir,
             family=str(req.meta.get("family") or knobs.get("family") or ""),
@@ -172,13 +171,30 @@ class ChampSimBackend(SimBackend):
         cand_g = geo_mean(cand_mpkis)
         reduction = compute_reduction(base_g, cand_g)
         # If parser failed to get baseline, fall back to knobs only as note — not as evidence
-        if reduction is None:
-            reduction = float(knobs.get("miss_reduction") or 0)
-            note = "partial parse; reduction from knobs (weak)"
+        if reduction is None and knobs.get("miss_reduction") is not None:
+            try:
+                reduction = float(knobs["miss_reduction"])
+                note = "partial parse; reduction from written knobs (weak)"
+            except (TypeError, ValueError):
+                reduction = None
+                note = "partial parse; no honest miss_reduction"
+        elif reduction is None:
+            note = "partial parse; no honest miss_reduction"
         else:
             note = None
 
-        bw = float(knobs.get("extra_bw", 0.02))
+        bw = None
+        if knobs.get("extra_bw") is not None:
+            try:
+                bw = float(knobs["extra_bw"])
+            except (TypeError, ValueError):
+                bw = None
+        area = None
+        if knobs.get("area") is not None:
+            try:
+                area = float(knobs["area"])
+            except (TypeError, ValueError):
+                area = None
         metrics = SimMetrics(
             evidence="sim",
             backend="champsim",
@@ -188,19 +204,14 @@ class ChampSimBackend(SimBackend):
             miss_reduction=reduction,
             ipc=geo_mean(ipcs) if ipcs else None,
             bw_delta_frac=bw,
-            area_mm2=float(knobs.get("area", 0.3)),
+            area_mm2=area,
             per_trace=per_trace,
             note=note,
             extra={"n_traces": len(traces)},
         )
-        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
-        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
-        area_budget = req.meta.get("area_budget_mm2")
-        ok = metrics.gate_ok(
-            min_reduction=min_red,
-            max_bw=max_bw,
-            area_budget_mm2=float(area_budget) if area_budget is not None else None,
-        ) and all((t.mpki is not None) for t in per_trace)
+        ok = metrics.meta_gate_ok(req.meta) and all(
+            (t.mpki is not None) for t in per_trace
+        )
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

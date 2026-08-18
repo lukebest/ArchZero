@@ -27,7 +27,8 @@ from archzero.models import (
     TierResult,
     Verdict,
 )
-from archzero.sim.headlines import ranking_score
+from archzero.sim.families import CACHE, family_domain
+from archzero.sim.headlines import metrics_domain, ranking_score
 from archzero.spec.acc_parse import AcceptanceThresholds, parse_acceptance_thresholds
 from archzero.store.artifacts import ArtifactStore
 
@@ -99,7 +100,11 @@ _DOMAIN_HEADLINE = {
 }
 
 
-def code_persona_for(domain: str) -> str:
+def code_persona_for(domain: str, family: str | None = None) -> str:
+    if domain == "generic" and family:
+        kind = family_domain(family)
+        if kind != CACHE:
+            domain = kind
     if domain == "noc":
         return CODE_PERSONA_NOC
     if domain == "dataflow":
@@ -111,21 +116,41 @@ def code_persona_for(domain: str) -> str:
     return CODE_PERSONA_GENERIC
 
 
-def _headline_score(metrics: dict, th: AcceptanceThresholds) -> float:
+def _effective_domain(
+    th: AcceptanceThresholds,
+    metrics: dict | None = None,
+    family: str | None = None,
+) -> str:
+    """Resolve a generic spec to cache / noc / dataflow / wafer."""
+    if th.domain and th.domain != "generic":
+        return th.domain
+    kind = family_domain(family)
+    if kind != CACHE:
+        return kind
+    inferred = metrics_domain(metrics or {}, family)
+    return inferred
+
+
+def _headline_score(
+    metrics: dict, th: AcceptanceThresholds, family: str | None = None
+) -> float:
     """Higher-is-better sort key. Do not use p99 — larger latency is worse."""
-    scored = ranking_score(metrics, domain=th.domain)
+    scored = ranking_score(metrics, family=family, domain=th.domain)
     if scored is not None:
         return scored
-    if th.domain in ("cache", "generic"):
+    if _effective_domain(th, metrics, family) == "cache":
         return float(metrics.get("miss_reduction") or 0.0)
     return 0.0
 
 
 def _tier2_result_score(
-    metrics: dict, th: AcceptanceThresholds, data: dict | None
+    metrics: dict,
+    th: AcceptanceThresholds,
+    data: dict | None,
+    family: str | None = None,
 ) -> float:
-    ranked = _headline_score(metrics, th)
-    if th.domain not in ("cache", "generic"):
+    ranked = _headline_score(metrics, th, family)
+    if th.domain != "cache":
         return ranked
     if data is not None and data.get("score") is not None:
         try:
@@ -136,11 +161,22 @@ def _tier2_result_score(
 
 
 def _sanitize_domain_metrics(
-    metrics: dict, th: AcceptanceThresholds, *, strict: bool
+    metrics: dict,
+    th: AcceptanceThresholds,
+    *,
+    strict: bool,
+    family: str | None = None,
 ) -> dict:
-    """Drop leaked cache keys on off-domain specs when strict_acc is on."""
+    """Drop leaked cache keys on off-domain specs when strict_acc is on.
+
+    A ``generic`` package used to keep invented MPKI next to a real goodput
+    number. Infer the domain from family / measured keys and strip the leak.
+    """
     out = dict(metrics)
-    if not strict or th.domain in ("cache", "generic"):
+    if not strict:
+        return out
+    kind = _effective_domain(th, out, family)
+    if kind == "cache":
         return out
     leaked = [k for k in _CACHE_METRIC_KEYS if k in out]
     if leaked:
@@ -249,7 +285,7 @@ async def _run_single_tier2_attempt(
         arts.put_text(spec_text, suffix=".md")
 
     # Phase 2: code + repair loop
-    persona = code_persona_for(th.domain)
+    persona = code_persona_for(th.domain, candidate.family)
     code_ctx = base + f"\n\nSPECIFICATION:\n{spec_text}\n"
     model_path = run_dir / "model.py"
     metrics: dict | None = None
@@ -295,7 +331,7 @@ async def _run_single_tier2_attempt(
         )
 
     metrics = _sanitize_domain_metrics(
-        metrics, th, strict=cfg.funnel.strict_acc
+        metrics, th, strict=cfg.funnel.strict_acc, family=candidate.family
     )
     needed = _DOMAIN_HEADLINE.get(th.domain)
     if (
@@ -338,7 +374,7 @@ async def _run_single_tier2_attempt(
             failed = [v.name for v in verifiers if not v.ok]
             return Tier2RunResult(
                 verdict=Verdict.FAIL,
-                score=_headline_score(metrics, th),
+                score=_headline_score(metrics, th, candidate.family),
                 summary=f"verifier FAIL: {', '.join(failed)}",
                 metrics={"model": metrics, "verifiers": [v.name for v in verifiers]},
                 insight={},
@@ -351,7 +387,7 @@ async def _run_single_tier2_attempt(
     if not acc_ok:
         return Tier2RunResult(
             verdict=Verdict.FAIL,
-            score=_headline_score(metrics, th),
+            score=_headline_score(metrics, th, candidate.family),
             summary=acc_note,
             metrics={"model": metrics},
             insight={},
@@ -377,7 +413,7 @@ async def _run_single_tier2_attempt(
         data = {
             "verdict": "fail",
             "summary": f"insight error (fail-closed): {exc}",
-            "score": _headline_score(metrics, th),
+            "score": _headline_score(metrics, th, candidate.family),
         }
 
     insight_pass = str(data.get("verdict", "")).lower() == "pass"
@@ -406,7 +442,7 @@ async def _run_single_tier2_attempt(
 
     return Tier2RunResult(
         verdict=verdict,
-        score=_tier2_result_score(metrics, th, data),
+        score=_tier2_result_score(metrics, th, data, candidate.family),
         summary=str(data.get("summary") or ""),
         metrics={"model": metrics},
         insight=data,

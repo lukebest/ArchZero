@@ -17,7 +17,7 @@
 | Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
 | Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
 | Tier2 | Implemented | 沙箱 + ensemble 多数决 + spec/functional verifier；`-c archzero.paper.toml` 可开 ×3 |
-| Tier3 directed / dedicated / noc | Implemented | directed 机制模型；NoC 解析模型（领域自动路由）；`-c archzero.paper.toml` 开 `llm_dedicated_sim` |
+| Tier3 directed / dedicated / noc / dataflow / wafer | Implemented | directed 机制模型；领域解析后端自动路由；晶圆良率/热密度仍不可测；`-c archzero.paper.toml` 开 `llm_dedicated_sim` |
 | Tier3/4 ChampSim | Optional | 二进制缺省→`UNAVAILABLE`（`strict_evidence`）；见 `tools/CHAMPSIM.md` |
 | Tier3/4 gem5 | Scaffold | 需本机 gem5 + agent harness |
 | Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
@@ -50,14 +50,14 @@ Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5 ⇢ Tier6(reserved)
 
 ```bash
 uv sync --extra dev
-uv run archzero seed-demo      # 三个离线 campaign：缓存 / NoC report-only / 晶圆级拒判
+uv run archzero seed-demo      # 四条离线战役：缓存 / NoC report-only / dataflow / 晶圆良率拒判
 uv run archzero ui             # http://127.0.0.1:8787/
 ```
 
-看板里会有两轮实验。第二轮（NoC 尾时延）会挂一条红色横幅说明**漏斗拒绝评判这个问题包**——因为本仓库没有评估器能测 p99 完成时延，用缓存门限硬评会给出不可信结论。这是刻意设计的：
+看板里会有多轮实验。NoC / dataflow 战役是 **report-only**：解析后端会报 p99/goodput 或 PE 利用率，但规范没写数值门限就不裁决。晶圆良率/热密度仍无模型，漏斗拒判而不是用 hop/d2d 冒充。这是刻意设计的：
 
 ```bash
-uv run archzero acc specs/noc_low_tail_collectives.md   # 逐项列出门限来自规范还是缺省值
+uv run archzero acc specs/noc_low_tail_collectives.md   # 可测、report-only（缺省缓存门限不生效）
 uv run archzero acc specs/demo.md                        # 对照：缓存问题四个门限全部来自条款
 ```
 
@@ -282,24 +282,24 @@ uv run archzero flow --spec specs/demo.md --patent   # 一条龙带专利
 
 ## 验收指标契约：漏斗只评判它真能测的东西
 
-漏斗的数值门限只认四个缓存量：`miss_reduction`、`bw_delta_frac`、`magic_gap`、`area_mm2`。这带来一个隐蔽问题：一份写得很好的 NoC 或晶圆级问题包，其 ACC 讲的是 p99 完成时延、goodput、抖动鲁棒性，解析后会**静默退化成缓存缺省值**（`>=15% MPKI`、`<=5% DRAM 带宽`、`<=0.5 mm²`），而输出与真正解析出门限的缓存问题一模一样——研究者无从分辨自己的方案是按什么标准被裁决的。
+漏斗曾经只认四个缓存量：`miss_reduction`、`bw_delta_frac`、`magic_gap`、`area_mm2`。一份写得很好的 NoC 或晶圆级问题包，解析后会**静默退化成** `>=15% MPKI`，输出和缓存问题一模一样。
 
 现在这条路被封住了：
 
-1. **指标注册表**（[`archzero/spec/metrics.py`](archzero/spec/metrics.py)）声明每个指标的单位、方向、领域，以及**谁能测它**。NoC / dataflow / wafer 指标目前 `evaluators` 为空，因为本仓库确实没有对应评估器。
-2. **门限带溯源**。`AcceptanceThresholds.defaulted` 记录哪些数字是条款里没有、由工具补上的缺省值；`archzero acc` 把它逐行打出来。
-3. **拒判而非误判**。`funnel.strict_acc = true`（默认）时，若一份规范的验收标准全靠无评估器的指标、且没有任何一条 ACC/REQ 给出漏斗能查的性能门限，则漏斗封顶在 Tier1，Tier2 报 `UNAVAILABLE`——与 Tier5/Tier6 缺工具时的立场一致。Tier0/Tier1 仍照常给出对抗评审，因为它们读的是条款文本，任何领域都成立。
-4. **别名按词边界匹配**。`admission control` 不再被当成 miss 相关需求（这正是 NoC 规范凭空获得 MPKI 门限的老路径之一）。
+1. **指标注册表**（[`archzero/spec/metrics.py`](archzero/spec/metrics.py)）声明每个指标的单位、方向、领域，以及**谁能测它**。NoC / dataflow / 晶圆织物（hop、die-to-die BW）由解析后端产出；良率与热密度的 `evaluators` 仍为空。
+2. **门限带溯源**。只应用规范声明的性能门限。缺省的缓存数字不再拿来 fail 一份从未提过 MPKI 的规范。`archzero acc` 逐行标出「规范声明 / 缺省值 / 不可测」。
+3. **能测但无门限 → report-only；完全不可测 → 拒判**。`funnel.strict_acc = true`（默认）时，若验收全靠无评估器的指标（例如晶圆良率/热密度），漏斗封顶在 Tier1，Tier2 报 `UNAVAILABLE`。NoC / dataflow 有解析模型，没有数值门限时只报数、不裁决。
+4. **别名按词边界匹配**。`admission control` 不再被当成 miss 相关需求。ChampSim / gem5 对非缓存 family 标 `inapplicable`，不发明 MPKI。
 
 ```bash
 uv run archzero acc specs/demo.md                        # 四个门限全部「规范声明」→ 可评判
-uv run archzero acc specs/noc_low_tail_collectives.md    # 三个是缺省值 → 不可评判，附原因
+uv run archzero acc specs/noc_low_tail_collectives.md    # 可测、report-only（缓存缺省值不生效）
 uv run archzero acc specs/demo.md --registry             # 附完整跨域指标注册表
 ```
 
 想强行按缓存门限跑（结论不可信，自负）：`archzero.toml` 里设 `[funnel] strict_acc = false`。
 
-**给 SoC / WSE 研究者的现状说明**：`new-spec --domain noc|dataflow|wafer` 能脚手架出对的骨架。NoC 问题包现在会走解析式 `noc` 后端（8×6 iso-wire mesh/torus，p95/p99/goodput/利用率）；规范没给数值门限时只报数、不裁决。这不是 flit 级仿真。dataflow / wafer 仍无评估器，Tier2+ 继续拒判而不是给你一个关于 MPKI 的假 PASS。
+**给 SoC / WSE 研究者的现状说明**：`new-spec --domain noc|dataflow|wafer` 脚手架出对的骨架。NoC / dataflow / 晶圆织物走解析后端（不是 flit 级仿真，也不是 Timeloop / 热阻网络）。排序用 goodput / PE 利用率 / d2d，不用缺失的 MPKI。良率与热密度仍然不可测，hop/d2d 不会冒充它们。
 
 仿真后端由注册表解析（`archzero.sim.registry`）。`[sim].backend` 拼错不再静默退回 stub；第三方可通过 `archzero.sim_backends` entry-point 注册新评估器。
 

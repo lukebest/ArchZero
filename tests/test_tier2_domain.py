@@ -38,6 +38,36 @@ def test_code_persona_is_domain_shaped():
     assert "predicted_mpki" in CODE_PERSONA_CACHE
 
 
+def test_sanitize_strips_leaked_mpki_on_generic_when_goodput_present():
+    from archzero.spec.acc_parse import AcceptanceThresholds
+
+    th = AcceptanceThresholds(domain="generic")
+    raw = {
+        "miss_reduction": 0.22,
+        "predicted_mpki": 6.5,
+        "goodput": 0.77,
+        "p99_latency": 1400.0,
+        "meets_target": True,
+    }
+    cleaned = _sanitize_domain_metrics(
+        raw, th, strict=True, family="request_grant"
+    )
+    assert "miss_reduction" not in cleaned
+    assert cleaned["goodput"] == 0.77
+    cache_only = {"miss_reduction": 0.22, "predicted_mpki": 6.5}
+    kept_cache = _sanitize_domain_metrics(
+        cache_only, th, strict=True, family="prefetch"
+    )
+    assert kept_cache["miss_reduction"] == 0.22
+
+
+def test_code_persona_generic_follows_off_cache_family():
+    assert "noc_model" in code_persona_for("generic", "request_grant")
+    generic_cache_family = code_persona_for("generic", "prefetch")
+    assert "do not invent cache MPKI" in generic_cache_family
+    assert "keys predicted_mpki" not in generic_cache_family
+
+
 def test_sanitize_strips_leaked_cache_keys_on_noc():
     th = parse_acceptance_thresholds(load_problem_package(
         Path(__file__).resolve().parents[1] / "specs" / "noc_low_tail_collectives.md"
@@ -183,3 +213,19 @@ def test_headline_score_noc_uses_goodput_not_p99():
     assert _headline_score(worse_tail, th) == pytest.approx(0.35)
     assert _headline_score(better_tail, th) == pytest.approx(0.80)
     assert _headline_score(better_tail, th) > _headline_score(worse_tail, th)
+
+def test_headline_score_generic_uses_goodput_not_zero_mpki():
+    from archzero.funnel.tier2 import _headline_score
+    from archzero.spec.acc_parse import AcceptanceThresholds
+
+    th = AcceptanceThresholds(domain="generic")
+    metrics = {"goodput": 0.77, "miss_reduction": 0.01}
+    assert _headline_score(metrics, th, "request_grant") == pytest.approx(0.77)
+
+
+def test_headline_score_generic_without_numbers_is_zero_not_invented_mpki():
+    from archzero.funnel.tier2 import _headline_score
+    from archzero.spec.acc_parse import AcceptanceThresholds
+
+    th = AcceptanceThresholds(domain="generic")
+    assert _headline_score({}, th) == 0.0

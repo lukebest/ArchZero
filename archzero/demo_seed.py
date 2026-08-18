@@ -14,9 +14,27 @@ from archzero.models import (
     TierResult,
     Verdict,
 )
+from archzero.offline import CACHE_DEMO_MISS_REDUCTION
 from archzero.spec.acc_parse import parse_acceptance_thresholds
 from archzero.spec.ndf import load_problem_package
 from archzero.store.db import Store
+
+_CACHE_VERDICT_TOKENS = (
+    "miss_reduction",
+    "mpki",
+    "predicted_mpki",
+    "ipc_speedup",
+    "baseline_mpki",
+)
+
+
+def _drop_cache_verdict(metrics: dict) -> dict:
+    """Off-cache demo seeds must not carry a leaked MPKI column."""
+    return {
+        k: v
+        for k, v in metrics.items()
+        if not any(tok in k for tok in _CACHE_VERDICT_TOKENS)
+    }
 
 DEMO_MECHANISMS = [
     (
@@ -109,8 +127,11 @@ def seed_demo_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict:
             clause_refs=["REQ-001", "ACC-001", "DOF-001"],
             status="active" if pass_t2 else "failed",
             metrics={
-                "t2_miss_reduction": 0.18 if pass_t2 else 0.08,
+                "t2_miss_reduction": (
+                    CACHE_DEMO_MISS_REDUCTION if pass_t2 else 0.08
+                ),
                 "demo": True,
+                "t2_source": "offline-demo-fixture",
             },
         )
         work = cfg.scratch_dir / "demo" / cand.id
@@ -251,7 +272,7 @@ def seed_noc_report_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict
                 meta={"title": title, "mechanism": mechanism, "family": family},
             )
         )
-        cand.metrics.update({f"t3_{k}": v for k, v in sim.metrics.items()})
+        cand.metrics.update(_drop_cache_verdict({f"t3_{k}": v for k, v in sim.metrics.items()}))
         p99 = sim.metrics.get("p99_latency")
         goodput = sim.metrics.get("goodput")
         cand.tier_history.append(
@@ -294,7 +315,7 @@ def seed_noc_report_campaign(cfg: FactoryConfig, *, force: bool = False) -> dict
                     f"noc analytic: p99={float(p99 or 0):.0f}cyc "
                     f"goodput={float(goodput or 0):.2f} report-only"
                 ),
-                metrics={**sim.metrics, "adjudicated": False},
+                metrics={**_drop_cache_verdict(sim.metrics), "adjudicated": False},
                 clause_refs=cand.clause_refs,
             )
         )
@@ -400,7 +421,7 @@ def seed_dataflow_report_campaign(cfg: FactoryConfig, *, force: bool = False) ->
                 meta={"title": title, "mechanism": mechanism, "family": family},
             )
         )
-        cand.metrics.update({f"t3_{k}": v for k, v in sim.metrics.items()})
+        cand.metrics.update(_drop_cache_verdict({f"t3_{k}": v for k, v in sim.metrics.items()}))
         pe = sim.metrics.get("pe_utilization")
         reuse = sim.metrics.get("reuse_factor")
         cand.tier_history.append(
@@ -443,7 +464,7 @@ def seed_dataflow_report_campaign(cfg: FactoryConfig, *, force: bool = False) ->
                     f"dataflow analytic: pe_util={float(pe or 0):.2f} "
                     f"reuse={float(reuse or 0):.2f} report-only"
                 ),
-                metrics={**sim.metrics, "adjudicated": False},
+                metrics={**_drop_cache_verdict(sim.metrics), "adjudicated": False},
                 clause_refs=cand.clause_refs,
             )
         )

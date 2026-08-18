@@ -53,6 +53,14 @@ def test_sim_metrics_gate_uses_acc_defaults():
     assert not area_bad.gate_ok(area_budget_mm2=0.5)
 
 
+def test_meta_gate_ok_does_not_invent_015_bar():
+    weak = SimMetrics(evidence="stub", miss_reduction=0.08, bw_delta_frac=0.02)
+    assert weak.meta_gate_ok({}) is True
+    assert weak.meta_gate_ok({"min_miss_reduction": 0.15}) is False
+    declared = SimMetrics(evidence="stub", miss_reduction=0.20, bw_delta_frac=0.02)
+    assert declared.meta_gate_ok({"min_miss_reduction": 0.15}) is True
+
+
 def test_tier2_threshold_gate_bw_and_area(demo_problem):
     from archzero.funnel.tier2 import _threshold_gate
 

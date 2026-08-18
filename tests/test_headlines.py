@@ -89,3 +89,8 @@ def test_ranking_score_noc_uses_goodput_not_leaked_mpki():
     assert ranking_score(metrics, family="request_grant") == pytest.approx(0.81)
     assert ranking_score({"t3_miss_reduction": 0.22}, family="request_grant") is None
     assert ranking_score({"t3_miss_reduction": 0.18}, family="prefetch") == pytest.approx(0.18)
+
+def test_ranking_score_generic_infers_goodput():
+    from archzero.sim.headlines import ranking_score
+    assert ranking_score({"goodput": 0.55, "miss_reduction": 0.02}, domain="generic") == 0.55
+    assert ranking_score({}, domain="generic") is None

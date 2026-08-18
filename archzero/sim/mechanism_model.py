@@ -25,9 +25,10 @@ class MechanismParams:
     prefetch_degree: int = 2
     filter_accuracy: float = 0.72
     bypass_threshold: float = 0.5
-    base_reduction: float = 0.18
+    base_reduction: float | None = None
     extra_bw: float = 0.02
     area_mm2: float = 0.25
+    reduction_declared: bool = False
 
 
 _FAMILY_HINTS = (
@@ -99,9 +100,12 @@ def infer_params(
         prefetch_degree=int(knobs.get("prefetch_degree") or degree),
         filter_accuracy=float(knobs.get("filter_accuracy") or 0.72),
         bypass_threshold=float(knobs.get("bypass_threshold") or 0.5),
-        base_reduction=float(knobs.get("miss_reduction") or 0.18),
+        base_reduction=float(knobs["miss_reduction"])
+        if knobs.get("miss_reduction") is not None
+        else None,
         extra_bw=float(knobs.get("extra_bw") or 0.02),
         area_mm2=float(knobs.get("area") or 0.25),
+        reduction_declared=knobs.get("miss_reduction") is not None,
     )
 
 
@@ -177,18 +181,35 @@ def simulate_mechanism(
             extra={"family": fam},
         )
 
+    if not params.reduction_declared or params.base_reduction is None:
+        return SimMetrics(
+            evidence="directed",
+            backend="directed",
+            suite=suite,
+            baseline_mpki=8.2,
+            mpki=8.2,
+            miss_reduction=None,
+            ipc=1.45,
+            note=(
+                f"mechanism event-model family={params.family}: "
+                "no miss_reduction in knobs; iso-baseline, not an 18% cut"
+            ),
+            extra={"family": params.family},
+        )
+
     seed = int(
         hashlib.sha256(f"{candidate_id}:{suite}:{params.family}".encode()).hexdigest()[:8],
         16,
     )
     # Stable pseudo-noise in [-0.01, 0.01]
     noise = ((seed % 2001) / 100000.0) - 0.01
+    base = float(params.base_reduction)
 
     if params.family in {"prefetch", "filter", "streamer"}:
         pollution = min(0.35, 0.04 * max(0, params.prefetch_degree - 1))
         capacity = min(1.0, math.log2(max(2, params.table_entries)) / 10.0)
         reduction = (
-            params.base_reduction
+            base
             * params.filter_accuracy
             * (1.0 - pollution)
             * (0.7 + 0.3 * capacity)
@@ -197,17 +218,17 @@ def simulate_mechanism(
     elif params.family == "replacement":
         hist_factor = min(1.0, params.history_len / 16.0)
         table_factor = min(1.0, params.table_entries / 512.0)
-        reduction = params.base_reduction * (0.55 + 0.45 * hist_factor * table_factor)
+        reduction = base * (0.55 + 0.45 * hist_factor * table_factor)
         bw = params.extra_bw * 0.5
     elif params.family == "bypass":
         useful = min(1.0, max(0.0, params.bypass_threshold))
-        reduction = params.base_reduction * (0.4 + 0.6 * useful)
+        reduction = base * (0.4 + 0.6 * useful)
         bw = max(0.0, params.extra_bw - 0.01 * useful)
     elif params.family == "coalesce":
-        reduction = params.base_reduction * 0.85
+        reduction = base * 0.85
         bw = max(0.0, params.extra_bw - 0.005)
     else:
-        reduction = params.base_reduction * 0.75
+        reduction = base * 0.75
         bw = params.extra_bw
 
     reduction = max(0.0, min(0.9, reduction + noise))
@@ -245,11 +266,23 @@ def report_magic_gap(model_reduction: float | None, sim_reduction: float | None)
 
 _GAP_METRIC = {
     "cache": "miss_reduction",
-    "generic": "miss_reduction",
     "noc": "goodput",
     "dataflow": "pe_utilization",
     "wafer": "die_to_die_bw",
 }
+
+# Prefer off-cache keys so a leaked MPKI pair does not win on a generic spec.
+_GAP_INFER_ORDER = ("goodput", "pe_utilization", "die_to_die_bw", "miss_reduction")
+
+
+def _gap_pair(cand: dict, sim: dict, key: str) -> tuple[float | None, float | None]:
+    model = cand.get(f"t2_{key}")
+    if model is None:
+        model = cand.get(key)
+    measured = sim.get(key)
+    if model is None or measured is None:
+        return None, None
+    return float(model), float(measured)
 
 
 def domain_magic_gap(
@@ -259,18 +292,19 @@ def domain_magic_gap(
 ) -> tuple[float | None, str | None]:
     """Compare the same domain quantity across Tier2 and Tier3.
 
-    Cache still uses miss_reduction. Off-cache must not silently skip the
-    check just because MPKI is absent — that hid T2/T3 inconsistency on NoC.
+    Cache still uses miss_reduction. ``generic`` infers from whichever
+    quantity is actually present — it must not assume MPKI.
     """
-    key = _GAP_METRIC.get(domain)
-    if not key:
-        return None, None
     cand = candidate_metrics or {}
     sim = sim_metrics or {}
-    model = cand.get(f"t2_{key}")
-    if model is None:
-        model = cand.get(key)
-    measured = sim.get(key)
-    if model is None or measured is None:
-        return None, None
-    return report_magic_gap(float(model), float(measured)), key
+    key = _GAP_METRIC.get(domain)
+    if key:
+        model, measured = _gap_pair(cand, sim, key)
+        if model is None or measured is None:
+            return None, None
+        return report_magic_gap(model, measured), key
+    for inferred in _GAP_INFER_ORDER:
+        model, measured = _gap_pair(cand, sim, inferred)
+        if model is not None and measured is not None:
+            return report_magic_gap(model, measured), inferred
+    return None, None

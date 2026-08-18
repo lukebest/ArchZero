@@ -21,6 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 NOC_SPEC = ROOT / "specs" / "noc_low_tail_collectives.md"
 
 
+def test_cache_demo_miss_reduction_is_a_named_fixture():
+    from archzero.offline import CACHE_DEMO_MISS_REDUCTION, analytic_snippet
+
+    assert CACHE_DEMO_MISS_REDUCTION == pytest.approx(0.18)
+    snippet = analytic_snippet("cache")
+    assert "miss_reduction" in snippet
+    assert "0.18" in snippet
+
+
 def test_knobs_for_noc_have_no_miss_reduction():
     knobs = knobs_for("noc", "request_grant")
     assert knobs["domain"] == "noc"
@@ -28,7 +37,8 @@ def test_knobs_for_noc_have_no_miss_reduction():
     assert "miss_reduction" not in knobs
     assert "extra_bw" not in knobs
     cache = knobs_for("cache", "prefetch")
-    assert cache["miss_reduction"] == pytest.approx(0.18)
+    assert "miss_reduction" not in cache
+    assert cache.get("family") == "prefetch"
 
 
 def test_problem_domain_reads_noc_spec():

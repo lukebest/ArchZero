@@ -57,8 +57,7 @@ class Gem5Backend(SimBackend):
             )
             script = req.workdir / "run_gem5.py"
 
-        knobs = {"miss_reduction": 0.12, "extra_bw": 0.02, "area": 0.3}
-        knobs.update(loaded)
+        knobs = dict(loaded)
 
         try:
             proc = subprocess.run(
@@ -94,14 +93,29 @@ class Gem5Backend(SimBackend):
         # Baseline may be recorded by agent as baseline_stats.txt
         base = parse_stats_txt(req.workdir / "baseline_stats.txt")
         reduction = compute_reduction(base.get("mpki"), stats.get("mpki"))
-        if reduction is None:
-            reduction = float(knobs.get("miss_reduction") or 0)
+        if reduction is None and knobs.get("miss_reduction") is not None:
+            try:
+                reduction = float(knobs["miss_reduction"])
+            except (TypeError, ValueError):
+                reduction = None
 
-        bw_delta = float(knobs.get("extra_bw", 0.02))
+        bw_delta = None
+        if knobs.get("extra_bw") is not None:
+            try:
+                bw_delta = float(knobs["extra_bw"])
+            except (TypeError, ValueError):
+                bw_delta = None
         if base.get("dram_bw_gbps") and stats.get("dram_bw_gbps"):
             b0 = float(base["dram_bw_gbps"])
             if b0 > 0:
                 bw_delta = (float(stats["dram_bw_gbps"]) - b0) / b0
+
+        area = None
+        if knobs.get("area") is not None:
+            try:
+                area = float(knobs["area"])
+            except (TypeError, ValueError):
+                area = None
 
         metrics = SimMetrics(
             evidence="sim",
@@ -112,18 +126,11 @@ class Gem5Backend(SimBackend):
             miss_reduction=reduction,
             ipc=stats.get("ipc"),
             bw_delta_frac=bw_delta,
-            area_mm2=float(knobs.get("area", 0.3)),
+            area_mm2=area,
             cycles=stats.get("cycles"),
             extra={"returncode": proc.returncode},
         )
-        min_red = float(req.meta.get("min_miss_reduction") or 0.15)
-        max_bw = float(req.meta.get("max_bw_delta_frac") or 0.05)
-        area_budget = req.meta.get("area_budget_mm2")
-        ok = proc.returncode == 0 and metrics.gate_ok(
-            min_reduction=min_red,
-            max_bw=max_bw,
-            area_budget_mm2=float(area_budget) if area_budget is not None else None,
-        )
+        ok = proc.returncode == 0 and metrics.meta_gate_ok(req.meta)
         return SimResult(
             ok=ok,
             metrics=metrics.as_dict(),

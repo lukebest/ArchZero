@@ -45,3 +45,23 @@ def test_stub_does_not_invent_mpki_for_noc_domain(tmp_path):
     assert "mpki" not in r.metrics
     assert "ipc" not in r.metrics
     assert r.metrics.get("evidence") == "stub"
+
+
+def test_stub_cache_without_knobs_does_not_invent_reduction(tmp_path):
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    backend = get_backend(cfg)
+    work = tmp_path / "w"
+    work.mkdir()
+    r = backend.run(
+        SimRequest(
+            candidate_id="c-empty",
+            workdir=work,
+            patch_hint="prefetch",
+            suite="small",
+            meta={"domain": "cache", "family": "prefetch"},
+        )
+    )
+    assert r.metrics.get("miss_reduction") is None
+    assert "12% cut" in (r.metrics.get("note") or "")
+    assert r.metrics.get("mpki") == r.metrics.get("baseline_mpki")

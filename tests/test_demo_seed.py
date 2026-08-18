@@ -1,5 +1,9 @@
 from archzero.config import FactoryConfig
-from archzero.demo_seed import seed_demo_campaign
+from archzero.demo_seed import (
+    seed_dataflow_report_campaign,
+    seed_demo_campaign,
+    seed_noc_report_campaign,
+)
 from archzero.models import Tier
 from archzero.store.db import Store
 
@@ -21,3 +25,21 @@ def test_seed_demo_creates_funnel(tmp_path):
     assert any(c.status == "active" for c in cands)
     again = seed_demo_campaign(cfg)
     assert again["created"] is False
+
+
+def test_off_cache_seeds_never_write_mpki(tmp_path):
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    for seed_fn in (seed_noc_report_campaign, seed_dataflow_report_campaign):
+        result = seed_fn(cfg)
+        store = Store(cfg.db_path)
+        for c in store.list_candidates(campaign_id=result["campaign_id"]):
+            leaked = [k for k in c.metrics if "miss_reduction" in k or k.endswith("mpki")]
+            assert leaked == [], leaked
+            for tr in c.tier_history:
+                leaked_tr = [
+                    k
+                    for k in (tr.metrics or {})
+                    if "miss_reduction" in k or k.endswith("mpki")
+                ]
+                assert leaked_tr == [], leaked_tr

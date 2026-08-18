@@ -20,6 +20,7 @@ from archzero.models import (
 )
 from archzero.sim.backend import SimRequest
 from archzero.sim.champsim_config import write_champsim_scaffold
+from archzero.sim.families import CACHE, family_domain
 from archzero.sim.gem5_harness import write_gem5_harness
 from archzero.sim.generate import generate_dedicated_sim, generate_dedicated_sim_llm
 from archzero.sim.headlines import headlines_text, ranking_score
@@ -41,10 +42,56 @@ Optionally write a brief SIM_PLAN.md."""
 HARNESS_PERSONA = HARNESS_PERSONA_CACHE
 
 
-def _harness_persona(domain: str) -> str:
-    if domain in {"noc", "dataflow", "wafer"}:
+def _harness_persona(domain: str, family: str | None = None) -> str:
+    if domain in {"noc", "dataflow", "wafer"} or family_domain(family) != CACHE:
         return HARNESS_PERSONA_DOMAIN
     return HARNESS_PERSONA_CACHE
+
+
+def _tier3_score(
+    sim_metrics: dict,
+    *,
+    family: str | None,
+    domain: str,
+) -> float | None:
+    """Higher-is-better. Generic + off-cache must not fall back to leaked MPKI."""
+    score = ranking_score(sim_metrics, family=family, domain=domain)
+    if score is not None:
+        return score
+    if domain == "cache" and family_domain(family) == CACHE:
+        raw = sim_metrics.get("miss_reduction")
+        if raw is not None:
+            return float(raw)
+    return None
+
+
+def _cache_shaped(domain: str, family: str | None) -> bool:
+    return domain == "cache" and family_domain(family) == CACHE
+
+
+def _fallback_knobs(candidate: Candidate, domain: str) -> dict:
+    """Write only what we already know. Never invent 0.18 / 0.02 / 0.3."""
+    kind = domain if domain != "generic" else family_domain(candidate.family)
+    if kind != "cache" or family_domain(candidate.family) != CACHE:
+        return {"family": candidate.family, "domain": kind}
+    payload: dict = {
+        "family": candidate.family or "other",
+        "domain": "cache",
+    }
+    t2 = candidate.metrics.get("t2_miss_reduction")
+    if t2 is not None:
+        payload["miss_reduction"] = float(t2)
+    extra = candidate.metrics.get("t2_bw_delta_frac")
+    if extra is None:
+        extra = candidate.metrics.get("t2_extra_bw")
+    if extra is not None:
+        payload["extra_bw"] = float(extra)
+    area = candidate.metrics.get("t2_area_mm2")
+    if area is None:
+        area = candidate.metrics.get("t2_area")
+    if area is not None:
+        payload["area"] = float(area)
+    return payload
 
 
 async def evaluate_tier3(
@@ -64,36 +111,19 @@ async def evaluate_tier3(
         "Create sim_knobs.json for the stub/ChampSim/gem5/directed adapter."
     )
     try:
-        await llm.work(_harness_persona(th.domain), instruction, TaskClass.ANALYTIC, cwd=work)
+        await llm.work(
+            _harness_persona(th.domain, candidate.family),
+            instruction,
+            TaskClass.ANALYTIC,
+            cwd=work,
+        )
     except Exception:  # noqa: BLE001
         knobs = work / "sim_knobs.json"
         if not knobs.exists():
-            if th.domain != "cache":
-                knobs.write_text(
-                    json.dumps(
-                        {
-                            "family": candidate.family,
-                            "domain": th.domain,
-                        },
-                        indent=2,
-                    ),
-                    encoding="utf-8",
-                )
-            else:
-                knobs.write_text(
-                    json.dumps(
-                        {
-                            "miss_reduction": float(
-                                candidate.metrics.get("t2_miss_reduction") or 0.18
-                            ),
-                            "extra_bw": 0.02,
-                            "area": 0.3,
-                            "family": candidate.family or "other",
-                        },
-                        indent=2,
-                    ),
-                    encoding="utf-8",
-                )
+            knobs.write_text(
+                json.dumps(_fallback_knobs(candidate, th.domain), indent=2),
+                encoding="utf-8",
+            )
 
     # Generate audit-able dedicated simulator source (prefetch/replacement/bypass…)
     knobs_path = work / "sim_knobs.json"
@@ -137,7 +167,13 @@ async def evaluate_tier3(
         if "inapplicable" in gh:
             candidate.metrics["t3_gem5_inapplicable"] = gh["inapplicable"]
     candidate.metrics["t3_dedicated_family"] = gen.family
-    if gen.selftest_ok and gen.metrics and "miss_reduction" in gen.metrics:
+    if (
+        gen.selftest_ok
+        and gen.metrics
+        and "miss_reduction" in gen.metrics
+        and family_domain(candidate.family) == CACHE
+        and th.domain in ("cache", "generic")
+    ):
         candidate.metrics["t3_dedicated_miss_reduction"] = gen.metrics.get(
             "miss_reduction"
         )
@@ -173,11 +209,9 @@ async def evaluate_tier3(
     candidate.metrics["t3_adjudicated"] = outcome.adjudicated
     reduction = metrics_obj.miss_reduction
     bw = metrics_obj.bw_delta_frac
-    score = ranking_score(
+    score = _tier3_score(
         sim.metrics, family=candidate.family, domain=th.domain
     )
-    if score is None and th.domain in ("cache", "generic") and reduction is not None:
-        score = float(reduction)
 
     # Paper profile: dedicated_sim is adjudicating evidence, not audit-only.
     if cfg.funnel.llm_dedicated_sim and not gen.selftest_ok:
@@ -189,8 +223,11 @@ async def evaluate_tier3(
         and gen.metrics
         and th.from_spec("min_miss_reduction")
     ):
-        ded_red = float(gen.metrics.get("miss_reduction") or 0.0)
-        if ded_red < th.min_miss_reduction:
+        raw = gen.metrics.get("miss_reduction")
+        if raw is None:
+            gate_ok = False
+            candidate.metrics["t3_dedicated_adjudication"] = "acc_missing"
+        elif float(raw) < th.min_miss_reduction:
             gate_ok = False
             candidate.metrics["t3_dedicated_adjudication"] = "acc_miss"
         else:
@@ -253,7 +290,7 @@ async def evaluate_tier3(
         else:
             verdict = Verdict.PASS if gate_ok else Verdict.FAIL
             gap_note = f" magic_gap={gap:.2f}({gap_metric})" if gap is not None else ""
-            if th.domain not in ("cache", "generic") or reduction is None:
+            if not _cache_shaped(th.domain, candidate.family) or reduction is None:
                 hl = headlines_text(sim.metrics, family=candidate.family)
                 extra = f" {hl}" if hl else f" domain={th.domain}"
                 adj = " report-only" if not outcome.adjudicated else ""
@@ -286,7 +323,7 @@ async def evaluate_tier3(
                 f"{adj}{gap_note}"
             )
         else:
-            if reduction is None:
+            if reduction is None or not _cache_shaped(th.domain, candidate.family):
                 hl = headlines_text(sim.metrics, family=candidate.family)
                 summary = (
                     f"{sim.backend}: {hl or ('domain=' + th.domain)} "
