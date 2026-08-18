@@ -269,6 +269,26 @@ def test_scaffolded_wafer_is_measurable_report_only(tmp_path: Path):
     assert "thermal_density" in th.unmeasurable_metrics
 
 
+@pytest.mark.parametrize("alias", ["cpu", "memory", "core"])
+def test_cpu_memory_aliases_scaffold_as_cache(alias, tmp_path: Path):
+    from archzero.spec.wizard import resolve_scaffold_domain
+
+    assert resolve_scaffold_domain(alias) == "cache"
+    path = scaffold_problem(
+        title=f"{alias} probe",
+        workload="SPEC CPU / LLC",
+        symptom="MPKI",
+        constraint="area",
+        domain=alias,
+        out_dir=tmp_path,
+    )
+    pp = load_problem_package(path)
+    assert pp.meta["domain"] == "cache"
+    th = parse_acceptance_thresholds(pp)
+    assert th.domain == "cache"
+    assert th.gradable
+
+
 def test_unknown_domain_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="unknown domain"):
         scaffold_problem(

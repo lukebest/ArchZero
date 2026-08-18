@@ -1,6 +1,6 @@
 # ArchZero
 
-面向计算机体系结构的 **自动化 Idea Factory**：对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），实现 Generation + Tier0–5 Evaluation 闭环，并预留 Tier6 物理签核。  
+面向计算机体系结构的 **自动化 Idea Factory**——覆盖 **CPU 核、存储层次、片上互连、空间加速器、晶圆级织物** 等芯片设计问题，不限于某一种互连拓扑。对照论文 *Computer Architecture’s AlphaZero Moment*（[arXiv:2604.03312](https://arxiv.org/abs/2604.03312)），实现 Generation + Tier0–5 Evaluation 闭环，并预留 Tier6 物理签核。  
 **Feedback / 部署遥测层仅留接口，实现暂缓。Tier6 签核仅预留，不执行 OpenROAD/sky130。**
 
 论文 PDF 与一页解读：[`docs/2604.03312v1.pdf`](docs/2604.03312v1.pdf) · [`docs/ArchAlphaZero-paper-post.html`](docs/ArchAlphaZero-paper-post.html)
@@ -12,7 +12,8 @@
 | 层 | 状态 | 说明 |
 |----|------|------|
 | NDF-lite 规范 | Implemented | CTX/REQ/NNG/ACC/DOF/DEC + lint；ACC 数值解析进 T2–T4，**每个门限标注来自条款还是缺省值** |
-| 跨域指标契约 | Implemented | `spec/metrics.py` 注册表（cache/noc/dataflow/wafer）；能测但无门限 → report-only；无评估器 → Tier2 拒判（`archzero acc`） |
+| 跨域指标契约 | Implemented | `spec/metrics.py` 注册表（CPU/cache、NoC、dataflow、wafer）；能测但无门限 → report-only；无评估器 → Tier2 拒判（`archzero acc`） |
+| CPU / 存储层次 | Implemented | ChampSim / gem5 / stub / dedicated 事件模型；MPKI、IPC、DRAM 带宽；`new-spec --domain cache\|cpu\|memory` |
 | NoC 解析后端 | Implemented | 8×6 iso-wire mesh/torus α-β + 对分带宽模型；产出 p95/p99/goodput/利用率，不发明 MPKI 门限 |
 | Generation | Implemented | 读论文、clean-room、§5.1 frontier、auto-round |
 | Tier0 / Tier1 | Implemented | LLM 硬筛 + 多专家；provenance / evidence |
@@ -50,15 +51,15 @@ Tier0 → Tier1 → Tier2 → Tier3 → Tier4 → Tier5 ⇢ Tier6(reserved)
 
 ```bash
 uv sync --extra dev
-uv run archzero seed-demo      # 四条离线战役：缓存 / NoC report-only / dataflow / 晶圆良率拒判
+uv run archzero seed-demo      # 四条离线战役：CPU/缓存（可评判）/ NoC / dataflow / 晶圆良率拒判
 uv run archzero ui             # http://127.0.0.1:8787/
 ```
 
-看板里会有多轮实验。NoC / dataflow 战役是 **report-only**：解析后端会报 p99/goodput 或 PE 利用率，但规范没写数值门限就不裁决。晶圆良率/热密度仍无模型，漏斗拒判而不是用 hop/d2d 冒充。这是刻意设计的：
+看板里默认先看 **CPU / 缓存** 战役（`specs/demo.md`：MPKI / DRAM 带宽门限来自条款，ChampSim/gem5/stub 可评判）。另外几轮演示漏斗如何对待**别的**芯片问题：NoC / dataflow 是 **report-only**（有解析模型、规范没写数值门限就不裁决）；晶圆良率/热密度仍无模型，拒判而不是用 hop/d2d 冒充。
 
 ```bash
-uv run archzero acc specs/noc_low_tail_collectives.md   # 可测、report-only（缺省缓存门限不生效）
-uv run archzero acc specs/demo.md                        # 对照：缓存问题四个门限全部来自条款
+uv run archzero acc specs/demo.md                        # CPU/缓存：四个门限全部来自条款 → 可评判
+uv run archzero acc specs/noc_low_tail_collectives.md   # 互连：可测、report-only（缓存缺省门限不生效）
 ```
 
 ### 1. 依赖与 API Key
@@ -280,26 +281,32 @@ uv run archzero flow --spec specs/demo.md --patent   # 一条龙带专利
 
 ---
 
-## 验收指标契约：漏斗只评判它真能测的东西
+## 问题领域与验收契约
 
-漏斗曾经只认四个缓存量：`miss_reduction`、`bw_delta_frac`、`magic_gap`、`area_mm2`。一份写得很好的 NoC 或晶圆级问题包，解析后会**静默退化成** `>=15% MPKI`，输出和缓存问题一模一样。
+ArchZero 的问题包可以是 **CPU 微结构、缓存 / 存储层次、NoC、数据流加速器、晶圆级织物**——漏斗按规范声明的量评分，而不是把所有芯片问题都收成 L2 预取器。
 
-现在这条路被封住了：
+| 领域 | `new-spec --domain` | 漏斗现在能测什么 | 仍不能测 |
+|------|---------------------|------------------|----------|
+| CPU 核 / 缓存 / 存储 | `cache`、`cpu`、`memory` | MPKI、IPC、DRAM 带宽（ChampSim / gem5 / stub） | 完整核级 RTL 时序（Tier5 仍是缓存耦合基线） |
+| 片上互连 | `noc` | p99 / goodput / 抖动税（解析模型，非 flit 级） | 周期精确 NoC RTL |
+| 空间数据流 | `dataflow` | PE 利用率、reuse、SRAM 流量（解析 mapper） | Timeloop / 脉动 RTL |
+| 晶圆级织物 | `wafer` | hop 时延、die-to-die BW | 良率、冗余代价、热密度 |
 
-1. **指标注册表**（[`archzero/spec/metrics.py`](archzero/spec/metrics.py)）声明每个指标的单位、方向、领域，以及**谁能测它**。NoC / dataflow / 晶圆织物（hop、die-to-die BW）由解析后端产出；良率与热密度的 `evaluators` 仍为空。
-2. **门限带溯源**。只应用规范声明的性能门限。缺省的缓存数字不再拿来 fail 一份从未提过 MPKI 的规范。`archzero acc` 逐行标出「规范声明 / 缺省值 / 不可测」。
-3. **能测但无门限 → report-only；完全不可测 → 拒判**。`funnel.strict_acc = true`（默认）时，若验收全靠无评估器的指标（例如晶圆良率/热密度），漏斗封顶在 Tier1，Tier2 报 `UNAVAILABLE`。NoC / dataflow 有解析模型，没有数值门限时只报数、不裁决。
-4. **别名按词边界匹配**。`admission control` 不再被当成 miss 相关需求。ChampSim / gem5 对非缓存 family 标 `inapplicable`，不发明 MPKI。
+漏斗曾经只认四个缓存量。一份写得很好的 NoC 问题包会**静默退化成** `>=15% MPKI`。现在：
+
+1. **指标注册表**声明每个量的领域和评估器。CPU/缓存路径保持可评判；其它领域用自己的后端，缺评估器就拒判。
+2. **只应用规范声明的门限。** 缺省的缓存数字不再拿来 fail 一份从未提过 MPKI 的规范。
+3. **能测但无门限 → report-only；完全不可测 → 拒判。**
+4. ChampSim / gem5 对非 CPU/缓存 family 标 `inapplicable`，不发明 MPKI。
 
 ```bash
-uv run archzero acc specs/demo.md                        # 四个门限全部「规范声明」→ 可评判
-uv run archzero acc specs/noc_low_tail_collectives.md    # 可测、report-only（缓存缺省值不生效）
-uv run archzero acc specs/demo.md --registry             # 附完整跨域指标注册表
+uv run archzero acc specs/demo.md                        # CPU/缓存：门限「规范声明」→ 可评判
+uv run archzero acc specs/noc_low_tail_collectives.md    # 互连：可测、report-only
+uv run archzero acc specs/demo.md --registry             # 完整跨域指标注册表
+uv run archzero new-spec --domain cpu --title "..." ...  # 与 --domain cache 同一套存储层次模板
 ```
 
-想强行按缓存门限跑（结论不可信，自负）：`archzero.toml` 里设 `[funnel] strict_acc = false`。
-
-**给 SoC / WSE 研究者的现状说明**：`new-spec --domain noc|dataflow|wafer` 脚手架出对的骨架。NoC / dataflow / 晶圆织物走解析后端（不是 flit 级仿真，也不是 Timeloop / 热阻网络）。排序用 goodput / PE 利用率 / d2d，不用缺失的 MPKI。良率与热密度仍然不可测，hop/d2d 不会冒充它们。
+想强行按缓存门限跑非缓存问题（结论不可信）：`archzero.toml` 里设 `[funnel] strict_acc = false`。
 
 仿真后端由注册表解析（`archzero.sim.registry`）。`[sim].backend` 拼错不再静默退回 stub；第三方可通过 `archzero.sim_backends` entry-point 注册新评估器。
 

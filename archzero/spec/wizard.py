@@ -1,10 +1,12 @@
 """Problem package scaffolding for architecture researchers.
 
-Scaffolds are domain-aware. The cache template is the historical default; the
-NoC, dataflow, and wafer templates exist because those researchers previously
-had to hand-write markdown *and* still got graded on MPKI. The non-cache
-templates deliberately state their real acceptance metrics, which makes
-``archzero acc`` report the evaluator gap instead of hiding it.
+ArchZero is a general chip-design Idea Factory: CPU cores, memory hierarchy,
+interconnect, spatial accelerators, and wafer-scale fabrics. The cache
+template is the default because ChampSim/gem5 already speak MPKI / IPC /
+DRAM bandwidth. ``cpu`` and ``memory`` are aliases for that template.
+
+NoC, dataflow, and wafer templates exist so those problems are not silently
+re-graded as L2 prefetch. They state their own acceptance metrics.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ class DomainTemplate:
 
 _CACHE = DomainTemplate(
     domain=CACHE,
-    label="缓存 / 存储层次",
+    label="CPU 核 / 缓存 / 存储层次",
     target_metric=">=15% MPKI reduction",
     budget_clause="Area budget for new structures <= 0.5 mm^2.",
     budget_req=(
@@ -146,6 +148,21 @@ TEMPLATES: dict[str, DomainTemplate] = {
     WAFER: _WAFER,
 }
 
+# Researcher-facing names that share the CPU / memory-hierarchy template.
+DOMAIN_ALIASES: dict[str, str] = {
+    "cpu": CACHE,
+    "core": CACHE,
+    "memory": CACHE,
+    "mem": CACHE,
+    "llc": CACHE,
+}
+
+
+def resolve_scaffold_domain(name: str) -> str:
+    """Map ``cpu`` / ``memory`` onto the cache template; other names pass through."""
+    key = (name or "").strip().lower()
+    return DOMAIN_ALIASES.get(key, key)
+
 
 def scaffold_problem(
     *,
@@ -162,12 +179,15 @@ def scaffold_problem(
     out_dir: Path,
 ) -> Path:
     """Create a lint-ready NDF-lite problem package from researcher fields."""
+    resolved = resolve_scaffold_domain(domain)
     try:
-        tpl = TEMPLATES[domain]
+        tpl = TEMPLATES[resolved]
     except KeyError as e:
+        expected = sorted({*TEMPLATES, *DOMAIN_ALIASES})
         raise ValueError(
-            f"unknown domain {domain!r}; expected one of {sorted(TEMPLATES)}"
+            f"unknown domain {domain!r}; expected one of {expected}"
         ) from e
+    domain = resolved
 
     goal = target_metric or tpl.target_metric
     budget = area_budget or tpl.budget_clause

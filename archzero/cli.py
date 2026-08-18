@@ -22,7 +22,7 @@ from archzero.models import Tier
 
 app = typer.Typer(
     name="archzero",
-    help="Idea Factory for computer architecture (telemetry deferred).",
+    help="Idea Factory for computer architecture — CPU, memory, NoC, and other chip design.",
     no_args_is_help=True,
 )
 console = Console()
@@ -949,19 +949,27 @@ def new_spec_cmd(
     domain: str = typer.Option(
         "cache",
         "--domain",
-        help="Clause template: cache | noc | dataflow | wafer",
+        help="Clause template: cache | cpu | memory | noc | dataflow | wafer",
     ),
     out: Path = typer.Option(Path("specs"), "--out", "-o", help="Output directory"),
 ) -> None:
     """Scaffold an NDF-lite problem package from researcher fields, then lint."""
     from archzero.spec.lint import lint_acceptance, lint_package
     from archzero.spec.ndf import load_problem_package
-    from archzero.spec.wizard import TEMPLATES, scaffold_problem
+    from archzero.spec.wizard import (
+        DOMAIN_ALIASES,
+        TEMPLATES,
+        resolve_scaffold_domain,
+        scaffold_problem,
+    )
 
-    if domain not in TEMPLATES:
+    resolved = resolve_scaffold_domain(domain)
+    if resolved not in TEMPLATES:
+        expected = ", ".join(sorted({*TEMPLATES, *DOMAIN_ALIASES}))
         raise typer.BadParameter(
-            f"unknown domain {domain!r}; expected one of {', '.join(sorted(TEMPLATES))}"
+            f"unknown domain {domain!r}; expected one of {expected}"
         )
+    domain = resolved
     path = scaffold_problem(
         title=title,
         workload=workload,

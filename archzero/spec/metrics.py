@@ -1,9 +1,11 @@
 """Cross-domain acceptance-metric registry.
 
-The funnel used to know exactly four numbers: MPKI reduction, DRAM bandwidth
-delta, IPC, and area. A problem package about NoC tail latency or wafer-scale
-fabric utilisation parsed to *those same four defaults*, so the funnel graded
-an interconnect study as if it were an L2 prefetcher and said nothing.
+The factory covers CPU cores, memory hierarchy, interconnect, spatial
+accelerators, and wafer-scale fabrics. The funnel used to know exactly four
+cache numbers: MPKI reduction, DRAM bandwidth delta, IPC, and area. A NoC or
+wafer package then parsed to *those same four defaults*, so interconnect work
+was graded as an L2 prefetcher. CPU / memory problems were fine; everything
+else was silently recast.
 
 This registry makes the metric vocabulary explicit and, more importantly,
 makes it possible to answer two questions honestly:
