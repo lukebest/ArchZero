@@ -1,7 +1,7 @@
 """ArchZero CLI.
 
-Offline (no API key): init | spec | acc | new-spec | seed-demo | ui | status |
-show | report | export | compare | reproduce | e2e --offline.
+Offline (no API key): init | spec | acc | new-spec | seed-demo | seed-library |
+ui | status | show | report | export | compare | reproduce | e2e --offline.
 Live (needs CURSOR_API_KEY): read | ideate | diverge | run | flow | frontier |
 evolve | patent.
 """
@@ -309,6 +309,11 @@ def run_cmd(
     diverge_per_cell: Optional[int] = typer.Option(
         None, "--diverge-per-cell", help="Ideas requested per cell (default 8)"
     ),
+    seed_library: Optional[bool] = typer.Option(
+        None,
+        "--seed-library/--no-seed-library",
+        help="Merge no-LLM mechanism×DOF seed grid into Tier0 intake",
+    ),
 ) -> None:
     """Run the evaluation funnel on generated or seeded candidates."""
     from archzero.funnel.pipeline import run_campaign
@@ -344,6 +349,7 @@ def run_cmd(
             use_divergence=diverge,
             diverge_cells=diverge_cells,
             diverge_per_cell=diverge_per_cell,
+            use_seed_library=seed_library,
         )
     )
     _print_acc_notice(result)
@@ -352,6 +358,17 @@ def run_cmd(
         f"passed={result['passed']} failed={result['failed']} "
         f"through={result.get('through', through)}"
     )
+    if result.get("intake"):
+        inn = result["intake"]
+        console.print(
+            f"[green]intake[/green] raw={inn.get('raw_generated')} "
+            f"seeds={inn.get('seed_library')} diverge={inn.get('divergence')} "
+            f"after_hash={inn.get('after_content_hash')} "
+            f"after_jaccard={inn.get('after_jaccard')} "
+            f"dedup_collapse={inn.get('dedup_collapse')}"
+        )
+    if result.get("funnel"):
+        console.print(f"[green]funnel[/green] {result['funnel']}")
     if result.get("divergence"):
         dv = result["divergence"]
         console.print(
@@ -698,6 +715,45 @@ def report_cmd(
     cfg = _cfg(ctx.obj.get("config_path"))
     path = write_report(cfg, campaign_id=campaign, out=out)
     console.print(f"[green]wrote[/green] {path}")
+
+
+@app.command("seed-library")
+def seed_library_cmd(
+    ctx: typer.Context,
+    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    out: Path = typer.Option(Path("seeds"), "--out", "-o", help="Candidate markdown dir"),
+    n: Optional[int] = typer.Option(
+        None, "--n", help="Target idea count (default: config seed_library.target_n)"
+    ),
+) -> None:
+    """Write a no-LLM mechanism×DOF seed grid (feeds ``run --seed-dir``)."""
+    from archzero.funnel.dedup import dedup_candidates
+    from archzero.generation.seed_library import (
+        generate_seed_library,
+        seed_library_stats,
+        write_seed_dir,
+    )
+    from archzero.spec.ndf import load_problem_package
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    pp = load_problem_package(spec)
+    target = n if n is not None else cfg.seed_library.target_n
+    cands = generate_seed_library(pp, target_n=target)
+    after_hash = len({c.content_hash for c in cands})
+    kept = dedup_candidates(cands, threshold=0.85).kept
+    stats = seed_library_stats(
+        len(cands), after_hash, len(kept), target_n=target
+    )
+    wrote = write_seed_dir(cands, out)
+    console.print(
+        f"[green]seed-library[/green] wrote {wrote} → {out} "
+        f"(target={stats['target_n']} after_jaccard={stats['after_jaccard']} "
+        f"dedup_collapse={stats['dedup_collapse']})"
+    )
+    console.print(
+        f"  next: archzero run --spec {spec} --seed-dir {out} "
+        f"--no-diverge --through tier0"
+    )
 
 
 @app.command("seed-demo")

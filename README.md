@@ -157,10 +157,23 @@ uv run archzero run --spec specs/demo.md --through tier2 --n 8
 uv run archzero report --out report.md
 ```
 
-一条命令走完「问题 → 海量 idea → SOTA 方案」（等价于 `diverge` + `run` + `report`）：
+一条命令走完「问题 → 海量 idea → SOTA 方案」（等价于 `diverge` + seed-library + `run` + `report`）：
 
 ```bash
 uv run archzero flow --spec specs/demo.md --through tier2
+```
+
+默认漏斗形状（单 NDF、一轮 campaign）：T0 入口 ~1000 → T1 后 ~100 → T2 后 ~10。
+配额见 `archzero.toml` 的 `[quotas]`；T1 默认否决（`tier1_advisory=false`）；
+Tier0 默认批量硬筛（`tier0_batch_size=10`）。
+
+无 LLM 的 mechanism×DOF 种子库负责体积；跨域发散只花 LLM 预算做多样性：
+
+```bash
+uv run archzero seed-library --spec specs/demo.md -o seeds/ --n 1000
+uv run archzero run --spec specs/demo.md --seed-dir seeds/ --no-diverge --through tier0
+# 或默认：seed-library + diverge 自动合并进同一轮 intake
+uv run archzero run --spec specs/demo.md --through tier2
 ```
 
 跨领域海量发散（`8 理论透镜 × 24 跨域来源 × 3 发散模式` 组合矩阵，每个 cell 一次 LLM 调用）：
@@ -171,14 +184,12 @@ uv run archzero diverge --spec specs/demo.md -o divergence/     # 24 次调用 �
 uv run archzero run --spec specs/demo.md --diverge --through tier2
 ```
 
-默认 `--cells 24 --per-cell 8`，正好喂满 Tier0 的 `tier0_keep=200` 配额。
+默认 `--cells 24 --per-cell 8`（≈192）与 seed-library（默认 1000）合并后再去重进 Tier0。
 `--lens` / `--domain` 可白名单收窄；来源目录见 `archzero/generation/domains.py`。
 每个 idea 的 `metrics` 会记下 `diverge_lens` / `diverge_domain` / `diverge_mode`，
 方便事后统计哪类跨域最能活到最后。
 
-发散后 Tier0 默认逐个候选一次 LLM 调用（192 个 idea = 192 次）。
-在 `archzero.toml` 里设 `funnel.tier0_batch_size = 10` 可批量筛查，把 Tier0 成本降一个量级；
-默认 `0` 保持原有逐个语义。
+Tier0 默认按 `tier0_batch_size=10` 批量筛查；设为 `0` 可恢复逐个候选一次调用。
 
 有论文 PDF 时：
 
@@ -357,9 +368,12 @@ uv run archzero run --spec specs/demo.md [--pdf paper.pdf] \
 
 #### `--n` 与候选从哪来（优先级）
 
-1. `--seed-dir` 有内容 → 只用种子，**忽略** `--n` / `--pdf` 的生成路径  
-2. 否则若给了 `--pdf` → clean-room：读论文 + 对照 `--spec`，生成 `--n` 个机制候选  
-3. 否则（只有 `--spec`）→ 不读论文，仅按问题包条款 / DOF 独立生成 `--n` 个候选  
+1. `--seed-dir` 和/或默认 `seed_library` → 无 LLM 种子（体积）  
+2. 若 `divergence.enabled`（默认开）或 `--diverge` → 跨域矩阵 idea（多样性），与种子**合并**后再去重  
+3. 否则若给了 `--pdf` → clean-room：读论文 + 对照 `--spec`，生成 `--n` 个机制候选  
+4. 否则 → 仅按问题包条款 / DOF 独立生成 `--n` 个候选  
+
+关闭体积路径：`--no-seed-library`；关闭发散：`--no-diverge`。两者都关且无 `--seed-dir` 时才走 `--n` 独立出题。
 
 ### 有论文 PDF vs 无论文 PDF
 

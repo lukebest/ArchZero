@@ -46,10 +46,11 @@ class BudgetConfig(BaseModel):
 
 
 class FunnelQuotas(BaseModel):
-    tier0_keep: int = 200
-    tier1_keep: int = 50
-    tier2_keep: int = 20
-    tier3_keep: int = 8
+    # Target single-spec shape: ~1K enter T0 → ~100 after T1 → ~10 after T2.
+    tier0_keep: int = 1000
+    tier1_keep: int = 100
+    tier2_keep: int = 10
+    tier3_keep: int = 5
     tier4_keep: int = 3
     tier5_keep: int = 2
     tier6_keep: int = 2
@@ -84,21 +85,33 @@ class FunnelConfig(BaseModel):
     model_exec_timeout_s: int = 30
     model_exec_mem_mb: int = 512
     # Tier0: screen N candidates per LLM call (0 = one call per candidate).
-    # Only worth enabling for large divergence pools.
-    tier0_batch_size: int = 0
-    # T1 is expert critique + ranking. When True it does not block T2 —
-    # T0 remains the hard physics screen. Set False to restore the old veto.
-    tier1_advisory: bool = True
+    # Default 10 for large seed-library + divergence pools.
+    tier0_batch_size: int = 10
+    # T1 is expert critique + ranking. When False, FAIL blocks T2 (real cut).
+    # When True, T1 critiques but does not veto — cannot shape 1K→100.
+    tier1_advisory: bool = False
 
 
 class DivergenceConfig(BaseModel):
     """Cross-domain mass ideation (theory lens x domain source x mode)."""
 
-    enabled: bool = False
+    enabled: bool = True
     n_cells: int = 24
     per_cell: int = 8
     lens_whitelist: list[str] = Field(default_factory=list)
     domain_whitelist: list[str] = Field(default_factory=list)
+
+
+class SeedLibraryConfig(BaseModel):
+    """No-LLM mechanism×DOF grid that supplies Tier0 volume.
+
+    Divergence alone yields ``n_cells * per_cell`` (~192) ideas. The seed
+    library fills toward ``target_n`` without 1000 independent ideation calls.
+    Disable with ``enabled=false`` or ``archzero run --no-seed-library``.
+    """
+
+    enabled: bool = True
+    target_n: int = 1000
 
 
 class PatentConfig(BaseModel):
@@ -195,6 +208,7 @@ class FactoryConfig(BaseModel):
     sign: SignConfig = Field(default_factory=SignConfig)
     evolve: EvolveConfig = Field(default_factory=EvolveConfig)
     divergence: DivergenceConfig = Field(default_factory=DivergenceConfig)
+    seed_library: SeedLibraryConfig = Field(default_factory=SeedLibraryConfig)
     patent: PatentConfig = Field(default_factory=PatentConfig)
     cleanroom_n: int = 5
     default_through: Tier = Tier.T2
@@ -287,6 +301,7 @@ def load_config(path: Path | None = None) -> FactoryConfig:
         "sign",
         "evolve",
         "divergence",
+        "seed_library",
         "patent",
     ):
         if section in data and isinstance(data[section], dict):
@@ -330,10 +345,10 @@ cursor_pool_max_calls = 0
 concurrency = 4
 
 [quotas]
-tier0_keep = 200
-tier1_keep = 50
-tier2_keep = 20
-tier3_keep = 8
+tier0_keep = 1000
+tier1_keep = 100
+tier2_keep = 10
+tier3_keep = 5
 tier4_keep = 3
 tier5_keep = 2
 tier6_keep = 2
@@ -345,17 +360,22 @@ strict_acc = true
 ensemble_n = 1
 use_verifiers = true
 llm_dedicated_sim = false
-# T1 critiques but does not veto; T0 passers still enter T2.
-tier1_advisory = true
-# tier0_batch_size = 10  # batch-screen large divergence pools in one call
+# T1 veto restored: FAIL blocks T2 so the funnel can cut ~1K → ~100.
+tier1_advisory = false
+tier0_batch_size = 10
 
 [divergence]
 # Cross-domain mass ideation before Tier0. n_cells LLM calls -> n_cells*per_cell ideas.
-enabled = false
+enabled = true
 n_cells = 24
 per_cell = 8
 # lens_whitelist = ["queueing_theory", "information_theory"]
 # domain_whitelist = ["tcp_congestion", "db_query_optimization"]
+
+[seed_library]
+# No-LLM mechanism×DOF grid; merged with diverge before Tier0.
+enabled = true
+target_n = 1000
 
 [patent]
 # Optional module. pptx rendering needs: uv sync --extra patent
