@@ -1,3 +1,6 @@
 [submodule "vendor/pycircuit"]
 	path = vendor/pycircuit
 	url = https://github.com/lukebest/pyCircuit.git
+[submodule "vendor/openevolve"]
+	path = vendor/openevolve
+	url = https://github.com/lukebest/openevolve.git
