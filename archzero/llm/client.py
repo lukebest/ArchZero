@@ -113,13 +113,13 @@ class CursorLLM:
         expect_json: bool = False,
     ) -> str:
         """One-shot text completion: persona + context, no durable workspace edits."""
-        from archzero.llm.language import NATIVE_ZH_POLICY
+        from archzero.llm.language import MECHANISM_STYLE, NATIVE_ZH_POLICY
 
         routed = self.router.pick(task)
         self.last_routed = routed
         prompt = (
             f"You are operating under the following persona / system instructions:\n\n"
-            f"{persona.strip()}\n\n---\n\n{NATIVE_ZH_POLICY}\n---\n\n"
+            f"{persona.strip()}\n\n---\n\n{NATIVE_ZH_POLICY}\n\n{MECHANISM_STYLE}\n---\n\n"
             f"{context.strip()}"
         )
         if expect_json:
@@ -139,15 +139,17 @@ class CursorLLM:
         cwd: Path,
     ) -> str:
         """Agentic work in a real cwd (write code, run commands)."""
-        from archzero.llm.language import NATIVE_ZH_POLICY
+        from archzero.llm.language import MECHANISM_STYLE, NATIVE_ZH_POLICY
 
         routed = self.router.pick(task)
         self.last_routed = routed
         cwd.mkdir(parents=True, exist_ok=True)
-        self._write_persona_rule(cwd, persona + "\n\n" + NATIVE_ZH_POLICY)
+        self._write_persona_rule(
+            cwd, persona + "\n\n" + NATIVE_ZH_POLICY + "\n\n" + MECHANISM_STYLE
+        )
         prompt = (
             f"Persona / standing orders:\n{persona.strip()}\n\n"
-            f"---\n\n{NATIVE_ZH_POLICY}\n---\n\n"
+            f"---\n\n{NATIVE_ZH_POLICY}\n\n{MECHANISM_STYLE}\n---\n\n"
             f"Task:\n{instruction.strip()}\n\n"
             "Make the necessary file edits in the current workspace. "
             "When done, summarize in Simplified Chinese what you changed and any metrics."

@@ -32,7 +32,7 @@ IDEATE_PERSONA = """你是计算机体系结构机制发明者。
 只返回 JSON：{title, family, mechanism, expected_effect, risks, clause_refs}。
 title、mechanism、expected_effect、risks 必须原生用简体中文撰写（不要英文稿）。
 family 用简短英文标识（如 prefetch、noc_rg、cache）。
-mechanism 需足够具体，以便后续建立解析模型。"""
+mechanism 用「决策 / 状态 / 冲突 / 相对基线」四段写，让工程师能直接实现。"""
 
 SCORE_PERSONA = """你是 clean-room 出题评审。
 将候选机制与全文论文对照。

@@ -14,6 +14,7 @@ MUTATE_PERSONA_CACHE = """你在做体系结构机制的多样性变异搜索。
 根据父代机制与错误/产物，产出一个变体 JSON：
 {title, family, mechanism, knobs: {miss_reduction, extra_bw, area}}
 title 与 mechanism 必须原生简体中文；family 用英文短标识；knobs 数值保持英文键名。
+mechanism 按决策/状态/冲突/相对基线四段写，不要用跨学科隐喻当标题。
 保持可行，必要时探索不同 family。"""
 
 MUTATE_PERSONA_NOC = """你在做片上互连 / 集合通信机制的多样性变异搜索。
@@ -21,6 +22,7 @@ MUTATE_PERSONA_NOC = """你在做片上互连 / 集合通信机制的多样性�
 {title, family, mechanism, knobs: {family, message_b}}
 family 必须是 packet_switched | request_grant | push_on_pull | presched 之一。
 title 与 mechanism 必须原生简体中文；不要发明 miss_reduction / extra_bw / area。
+mechanism 按决策/状态/冲突/相对基线四段写，不要用跨学科隐喻当标题。
 保持可行，必要时探索不同 family。"""
 
 MUTATE_PERSONA_DATAFLOW = """你在做空间加速器 / 数据流映射的多样性变异搜索。
@@ -28,6 +30,7 @@ MUTATE_PERSONA_DATAFLOW = """你在做空间加速器 / 数据流映射的多样
 {title, family, mechanism, knobs: {family}}
 family 必须是 output_stationary | weight_stationary | input_stationary | row_stationary 之一。
 title 与 mechanism 必须原生简体中文；不要发明 miss_reduction / extra_bw / area。
+mechanism 按决策/状态/冲突/相对基线四段写，不要用跨学科隐喻当标题。
 保持可行，必要时探索不同 family。"""
 
 MUTATE_PERSONA_WAFER = """你在做晶圆级 / 多裸片织物机制的多样性变异搜索。
@@ -35,6 +38,7 @@ MUTATE_PERSONA_WAFER = """你在做晶圆级 / 多裸片织物机制的多样性
 {title, family, mechanism, knobs: {family}}
 family 必须是 mesh_xy | spare_bypass | compiled_partition 之一。
 title 与 mechanism 必须原生简体中文；不要发明 miss_reduction / extra_bw / area。
+mechanism 按决策/状态/冲突/相对基线四段写，不要用跨学科隐喻当标题。
 不要声称已测量良率或功耗密度。
 保持可行，必要时探索不同 family。"""
 
@@ -42,6 +46,7 @@ MUTATE_PERSONA_GENERIC = """你在做体系结构机制的多样性变异搜索�
 根据父代机制与错误/产物，产出一个变体 JSON：
 {title, family, mechanism, knobs: {}}
 title 与 mechanism 必须原生简体中文；family 用英文短标识。
+mechanism 按决策/状态/冲突/相对基线四段写，不要用跨学科隐喻当标题。
 knobs 的键必须是该问题声明的指标，不要发明缓存 MPKI。"""
 
 # Back-compat alias used by older tests / docs.

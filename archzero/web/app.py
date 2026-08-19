@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from archzero.config import FactoryConfig, load_config
+from archzero.generation.plain import has_plain_rewrite, rewrite_mechanism_plain
 from archzero.models import Tier, Verdict
 from archzero.sim.headlines import candidate_headlines, metrics_domain
 from archzero.store.db import Store
@@ -69,14 +70,21 @@ def _serialize_candidate(c) -> dict[str, Any]:
     metrics = c.metrics or {}
     mechanism_zh = metrics.get("mechanism_zh")
     title_zh = metrics.get("title_zh")
+    title_plain = metrics.get("title_plain")
+    mechanism_plain = metrics.get("mechanism_plain")
     return {
         "id": c.id,
         "title": c.title,
         "title_zh": title_zh,
+        "title_plain": title_plain,
         "family": c.family,
         "status": c.status,
         "mechanism": c.mechanism[:400],
         "mechanism_zh": (str(mechanism_zh)[:400] if mechanism_zh else None),
+        "mechanism_plain": (
+            str(mechanism_plain)[:400] if mechanism_plain else None
+        ),
+        "has_plain": has_plain_rewrite(c),
         "last_tier": lt.tier.value if lt else None,
         "last_verdict": lt.verdict.value if lt else None,
         "score": lt.score if lt else None,
@@ -133,6 +141,17 @@ async def _translate_mechanism_zh(cfg: FactoryConfig, candidate) -> dict[str, st
     metrics["mechanism_zh"] = mechanism_zh
     candidate.metrics = metrics
     return {"title_zh": title_zh, "mechanism_zh": mechanism_zh, "cached": False}
+
+
+def _persist_candidate(store: Store, candidate) -> None:
+    store.save_candidate(candidate, campaign_id=store.candidate_campaign_id(candidate.id))
+
+
+def _plain_limit(qs: dict[str, list[str]], default: int = 8) -> int:
+    try:
+        return min(8, max(1, int((qs.get("limit") or [str(default)])[0])))
+    except ValueError:
+        return default
 
 
 def make_handler(cfg: FactoryConfig):
@@ -231,7 +250,7 @@ def make_handler(cfg: FactoryConfig):
                 return
             if path.startswith("/api/candidates/"):
                 parts = [p for p in path.split("/") if p]
-                # /api/candidates/<id> or /api/candidates/<id>/zh
+                # /api/candidates/<id> or /api/candidates/<id>/zh|/plain
                 if len(parts) < 3:
                     self._json(404, {"error": "not found"})
                     return
@@ -248,7 +267,7 @@ def make_handler(cfg: FactoryConfig):
                     except Exception as exc:  # noqa: BLE001
                         self._json(500, {"error": f"translate failed: {exc}"})
                         return
-                    store.save_candidate(c)
+                    _persist_candidate(store, c)
                     self._json(
                         200,
                         {
@@ -259,6 +278,20 @@ def make_handler(cfg: FactoryConfig):
                         },
                     )
                     return
+                if len(parts) >= 4 and parts[3] == "plain":
+                    import asyncio
+
+                    force = (qs.get("force") or [""])[0] in {"1", "true", "yes"}
+                    try:
+                        plain = asyncio.run(
+                            rewrite_mechanism_plain(cfg, c, force=force)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self._json(500, {"error": f"rewrite failed: {exc}"})
+                        return
+                    _persist_candidate(store, c)
+                    self._json(200, {"id": c.id, **plain})
+                    return
                 metrics = c.metrics or {}
                 self._json(
                     200,
@@ -266,6 +299,8 @@ def make_handler(cfg: FactoryConfig):
                         **_serialize_candidate(c),
                         "mechanism_full": c.mechanism,
                         "mechanism_zh_full": metrics.get("mechanism_zh"),
+                        "mechanism_plain_full": metrics.get("mechanism_plain"),
+                        "title_plain": metrics.get("title_plain"),
                         "title_zh": metrics.get("title_zh"),
                         "metrics": c.metrics,
                         "tier_history": [
@@ -336,6 +371,7 @@ def make_handler(cfg: FactoryConfig):
         def do_POST(self) -> None:  # noqa: N802
             parsed = urllib.parse.urlparse(self.path)
             parts = [p for p in parsed.path.split("/") if p]
+            qs = urllib.parse.parse_qs(parsed.query)
             if (
                 len(parts) == 4
                 and parts[0] == "api"
@@ -347,6 +383,53 @@ def make_handler(cfg: FactoryConfig):
                     self._json(404, {"error": "not found"})
                     return
                 self._json(200, {"ok": True, "id": camp.id, "status": camp.status})
+                return
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "campaigns"
+                and parts[3] == "plain"
+            ):
+                import asyncio
+
+                cid = parts[2]
+                camp = store.get_campaign(cid)
+                if camp is None:
+                    self._json(404, {"error": "not found"})
+                    return
+                force = (qs.get("force") or [""])[0] in {"1", "true", "yes"}
+                limit = _plain_limit(qs)
+                cands = store.list_candidates(campaign_id=cid)
+                todo = [
+                    c for c in cands if force or not has_plain_rewrite(c)
+                ][:limit]
+                rewritten: list[dict[str, Any]] = []
+                errors: list[dict[str, str]] = []
+                for c in todo:
+                    try:
+                        plain = asyncio.run(
+                            rewrite_mechanism_plain(cfg, c, force=force)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append({"id": c.id, "error": str(exc)})
+                        continue
+                    store.save_candidate(c, campaign_id=cid)
+                    rewritten.append({"id": c.id, **plain})
+                remaining = sum(
+                    1
+                    for c in store.list_candidates(campaign_id=cid)
+                    if not has_plain_rewrite(c)
+                )
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "rewritten": rewritten,
+                        "errors": errors,
+                        "remaining": remaining,
+                        "limit": limit,
+                    },
+                )
                 return
             self._json(404, {"error": "not found", "path": parsed.path})
 

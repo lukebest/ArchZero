@@ -210,6 +210,13 @@ class Store:
             ).fetchone()
         return Candidate.model_validate_json(row["json"]) if row else None
 
+    def candidate_campaign_id(self, cid: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT campaign_id FROM candidates WHERE id=?", (cid,)
+            ).fetchone()
+        return row["campaign_id"] if row else None
+
     def list_candidates(
         self, campaign_id: str | None = None, status: str | None = None
     ) -> list[Candidate]:

@@ -562,6 +562,7 @@
 
         <div class="panel-hd" style="margin-top:0.5rem">
           <h2>候选想法列表</h2>
+          <span class="camp-actions" id="cand-actions"></span>
         </div>
         <div class="tabs" id="cand-tabs">
           <button class="tab active" data-filter="all" type="button">全部</button>
@@ -677,6 +678,25 @@ function verdictBadge(v) {
 
 function failLabel(kind) {
   return FAIL_LABELS[kind] || kind || "—";
+}
+
+function displayTitle(c) {
+  return c.title_plain || c.title_zh || c.title || "未命名机制";
+}
+
+function displaySnippet(c) {
+  if (c.mechanism_plain) return c.mechanism_plain;
+  const raw = c.mechanism || "";
+  if (/[\u4e00-\u9fff]/.test(raw)) return raw;
+  return c.mechanism_zh || raw || "（无机制摘要）";
+}
+
+function applyPlainToCard(id, plain) {
+  const card = currentCandidates.find(x => x.id === id);
+  if (!card) return;
+  card.title_plain = plain.title_plain;
+  card.mechanism_plain = (plain.mechanism_plain || "").slice(0, 400);
+  card.has_plain = true;
 }
 
 function refreshComparePicks() {
@@ -1010,7 +1030,7 @@ function renderCandidates() {
     const tierName = tierMeta.name ? `${tierMeta.name} · ${c.last_tier}` : (c.last_tier || "未评估");
     return `<article class="cand" data-cid="${escapeHtml(c.id)}">
       <div class="row1">
-        <div class="title">${escapeHtml(c.title || "未命名机制")}</div>
+        <div class="title">${escapeHtml(displayTitle(c))}</div>
         ${verdictBadge(c.last_verdict)}
       </div>
       <div class="sub">
@@ -1021,7 +1041,7 @@ function renderCandidates() {
         ${c.failures ? `<span class="badge bad">${c.failures} 条失败</span>` : ""}
         <span class="mono">${escapeHtml(shortId(c.id))}</span>
       </div>
-      <div class="snippet">${escapeHtml((/[\u4e00-\u9fff]/.test(c.mechanism || "") ? c.mechanism : (c.mechanism_zh || c.mechanism)) || "（无机制摘要）")}</div>
+      <div class="snippet">${escapeHtml(displaySnippet(c))}</div>
     </article>`;
   }).join("");
 
@@ -1074,9 +1094,41 @@ async function loadDetail(id, { keepDetail = false } = {}) {
   renderUsage(data.usage);
 
   currentCandidates = data.candidates || [];
+  const needPlain = currentCandidates.filter(c => !c.has_plain).length;
+  const actions = document.getElementById("cand-actions");
+  if (actions) {
+    actions.innerHTML = needPlain
+      ? `<button class="btn" type="button" id="camp-plain">工程化改写本轮（剩 ${needPlain}）</button>`
+      : `<span class="hint" style="margin:0">本轮已是工程化中文</span>`;
+    document.getElementById("camp-plain")?.addEventListener("click", () => rewriteCampaignPlain(id));
+  }
   renderCandidates();
   if (!keepDetail) {
     document.getElementById("detail").style.display = "none";
+  }
+}
+
+async function rewriteCampaignPlain(id) {
+  const btn = document.getElementById("camp-plain");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "改写中…";
+  }
+  try {
+    const out = await j(`/api/campaigns/${encodeURIComponent(id)}/plain?limit=8`, { method: "POST" });
+    for (const row of (out.rewritten || [])) applyPlainToCard(row.id, row);
+    renderCandidates();
+    const left = out.remaining ?? currentCandidates.filter(c => !c.has_plain).length;
+    if (btn) {
+      btn.disabled = left === 0;
+      btn.textContent = left ? `工程化改写本轮（剩 ${left}）` : "本轮已改写完";
+    }
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "改写失败，重试";
+    }
+    alert("工程化改写失败：" + (err.message || err));
   }
 }
 
@@ -1099,12 +1151,13 @@ async function showCandidate(id) {
 
   const mechNative = c.mechanism_full || c.mechanism || "";
   const mechCachedZh = c.mechanism_zh_full || c.mechanism_zh || "";
-  const titleShow = c.title_zh || c.title;
+  const mechPlain = c.mechanism_plain_full || c.mechanism_plain || "";
+  const titleShow = c.title_plain || c.title_zh || c.title;
   const nativeIsZh = /[\u4e00-\u9fff]/.test(mechNative);
-  const displayMech = nativeIsZh ? mechNative : (mechCachedZh || mechNative);
+  const displayMech = mechPlain || (nativeIsZh ? mechNative : (mechCachedZh || mechNative));
   document.getElementById("detail-body").innerHTML = `
     <p style="margin:0 0 0.35rem">
-      <strong style="font-size:1.05rem">${escapeHtml(titleShow)}</strong>
+      <strong style="font-size:1.05rem" id="detail-title">${escapeHtml(titleShow)}</strong>
       ${verdictBadge(c.last_verdict)}
       <span class="badge">${escapeHtml(c.family || "unclassified")}</span>
     </p>
@@ -1113,13 +1166,41 @@ async function showCandidate(id) {
     ${(c.headlines && c.headlines.length) ? `<div class="hint">测量数字</div><div class="sub">${c.headlines.map(h => `<span class="badge">${escapeHtml(h.label)} ${escapeHtml(h.display)}</span>`).join("")}</div>` : ""}
     ${fails ? `<div class="hint">失败明细</div><ul style="margin:0.2rem 0 0.6rem;padding-left:1.2rem;font-size:0.88rem;line-height:1.5">${fails}</ul>` : ""}
     <div class="panel-hd" style="margin-top:0.4rem">
-      <div class="hint" style="margin:0">方案 / 机制说明</div>
-      ${nativeIsZh ? "" : `<button class="btn" id="btn-zh" type="button">旧英文稿：译为中文</button>`}
+      <div class="hint" style="margin:0">方案 / 机制说明（决策 / 状态 / 冲突 / 相对基线）</div>
+      <span class="camp-actions">
+        <button class="btn" id="btn-plain" type="button">${mechPlain ? "重新工程化改写" : "工程化改写"}</button>
+        ${nativeIsZh ? "" : `<button class="btn" id="btn-zh" type="button">旧英文稿：译为中文</button>`}
+      </span>
     </div>
     <pre class="mech" id="mech-body">${escapeHtml(displayMech || "（空）")}</pre>
-    ${nativeIsZh ? "" : `<p class="hint">新一轮 <code>run</code> 会原生输出中文方案；此按钮仅用于补译旧候选。</p>`}
+    <p class="hint">新一轮发散会直接写成工程师能实现的中文。此按钮把已有隐喻稿改成四段硬件说明。</p>
     <p class="hint" style="margin-top:0.6rem">关联条款：${escapeHtml((c.clause_refs || []).join(", ") || "—")}</p>
   `;
+  const btnPlain = document.getElementById("btn-plain");
+  const fillPlain = async (force) => {
+    const pre = document.getElementById("mech-body");
+    if (btnPlain) {
+      btnPlain.disabled = true;
+      btnPlain.textContent = "改写中…";
+    }
+    try {
+      const q = force ? "?force=1" : "";
+      const plain = await j(`/api/candidates/${encodeURIComponent(id)}/plain${q}`);
+      pre.textContent = plain.mechanism_plain || "（空）";
+      const titleEl = document.getElementById("detail-title");
+      if (titleEl && plain.title_plain) titleEl.textContent = plain.title_plain;
+      applyPlainToCard(id, plain);
+      renderCandidates();
+      if (btnPlain) btnPlain.textContent = "重新工程化改写";
+    } catch (err) {
+      if (pre && !mechPlain) pre.textContent = "改写失败：" + (err.message || err);
+      if (btnPlain) btnPlain.textContent = "重试改写";
+    } finally {
+      if (btnPlain) btnPlain.disabled = false;
+    }
+  };
+  if (btnPlain) btnPlain.onclick = () => fillPlain(true);
+  if (!mechPlain) fillPlain(false);
   const btnZh = document.getElementById("btn-zh");
   if (btnZh) {
     btnZh.onclick = async () => {
@@ -1128,9 +1209,9 @@ async function showCandidate(id) {
       btnZh.textContent = "翻译中…";
       try {
         const zh = await j(`/api/candidates/${encodeURIComponent(id)}/zh`);
-        pre.textContent = zh.mechanism_zh || "（空）";
-        const titleEl = document.querySelector("#detail-body strong");
-        if (titleEl && zh.title_zh) titleEl.textContent = zh.title_zh;
+        const titleEl = document.getElementById("detail-title");
+        if (titleEl && !c.title_plain && zh.title_zh) titleEl.textContent = zh.title_zh;
+        if (!mechPlain) pre.textContent = zh.mechanism_zh || "（空）";
         btnZh.textContent = "重新翻译";
         const card = currentCandidates.find(x => x.id === id);
         if (card) {

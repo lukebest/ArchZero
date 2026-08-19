@@ -49,6 +49,8 @@ def test_serialize_includes_headlines():
         },
     )
     blob = _serialize_candidate(c)
+    assert blob["title_plain"] is None
+    assert blob["has_plain"] is False
     assert blob["metrics_domain"] == "noc"
     labels = [h["label"] for h in blob["headlines"]]
     assert "p99" in labels

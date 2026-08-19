@@ -104,6 +104,9 @@ def test_dashboard_exposes_acc_verdict_for_a_campaign(tmp_path):
     assert "stopCampaign" in index
     assert "deleteCampaign" in index
     assert "schedulePoll" in index
+    assert "rewriteCampaignPlain" in index
+    assert "工程化改写本轮" in index
+    assert "displayTitle" in index
 
 
 def _http(httpd, method: str, path: str):
