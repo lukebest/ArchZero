@@ -533,8 +533,13 @@ def evolve_cmd(
 @app.command("flow")
 def flow_cmd(
     ctx: typer.Context,
-    spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
+    spec: Optional[Path] = typer.Option(
+        None, "--spec", exists=True, help="Problem package (required unless --resume)"
+    ),
     through: str = typer.Option("tier2", "--through", help="Stop after this tier"),
+    resume: Optional[str] = typer.Option(
+        None, "--resume", help="Resume an existing campaign id"
+    ),
     cells: Optional[int] = typer.Option(
         None, "--cells", help="Divergence matrix cells (default 24)"
     ),
@@ -562,12 +567,16 @@ def flow_cmd(
         through_tier = Tier(through)
     except ValueError as e:
         raise typer.BadParameter(f"unknown tier {through}") from e
+    if resume is None and spec is None:
+        raise typer.BadParameter("--spec is required unless --resume is set")
 
-    pp = load_problem_package(spec)
-    issues = lint_package(pp)
-    for issue in issues:
-        console.print(f"[yellow]lint[/yellow] {issue}")
-    console.print(f"[green]spec[/green] {pp.id} — {len(pp.clauses)} clauses")
+    pp = None
+    if spec is not None:
+        pp = load_problem_package(spec)
+        issues = lint_package(pp)
+        for issue in issues:
+            console.print(f"[yellow]lint[/yellow] {issue}")
+        console.print(f"[green]spec[/green] {pp.id} — {len(pp.clauses)} clauses")
 
     try:
         result = asyncio.run(
@@ -575,20 +584,26 @@ def flow_cmd(
                 cfg,
                 spec_path=spec,
                 through=through_tier,
-                use_divergence=True,
+                use_divergence=resume is None,
                 diverge_cells=cells,
                 diverge_per_cell=per_cell,
+                resume_campaign_id=resume,
             )
         )
     except KeyboardInterrupt:
         console.print("[yellow]interrupted[/yellow] 进行中的轮次可在看板点「停止」后删除")
         raise typer.Exit(code=130) from None
     campaign_id = result["campaign_id"]
-    dv = result.get("divergence") or {}
-    console.print(
-        f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
-        f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
-    )
+    if result.get("resumed"):
+        console.print(
+            f"[green]resume[/green] {campaign_id} retried={result.get('retried', 0)}"
+        )
+    else:
+        dv = result.get("divergence") or {}
+        console.print(
+            f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
+            f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
+        )
     if result.get("stopped"):
         console.print(
             f"[yellow]stopped[/yellow] campaign {campaign_id} — 看板可删除该轮"

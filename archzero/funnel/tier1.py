@@ -7,6 +7,7 @@ import json
 import re
 
 from archzero.config import FactoryConfig
+from archzero.funnel.errors import infra_result, is_infra_error
 from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.generation.personas import (
@@ -89,6 +90,10 @@ async def evaluate_tier1(
             )
         )
     except Exception as exc:  # noqa: BLE001
+        if is_infra_error(str(exc), exc):
+            return attach_result(
+                candidate, infra_result(Tier.T1, f"tier1 synth error: {exc}")
+            )
         data = {"verdict": "fail", "summary": f"tier1 synth error: {exc}", "score": 0.0}
 
     verdict = Verdict.PASS if str(data.get("verdict", "")).lower() == "pass" else Verdict.FAIL

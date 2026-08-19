@@ -166,9 +166,15 @@ class Candidate(BaseModel):
         return self.tier_history[-1] if self.tier_history else None
 
     def passed_through(self, tier: Tier) -> bool:
-        """True if this candidate has a PASS or UNAVAILABLE result for the tier."""
+        """True if this candidate has a settled PASS or UNAVAILABLE for the tier.
+
+        Retryable UNAVAILABLE (bridge / ConnectError) is not settled — resume
+        must re-run that tier instead of treating the idea as done.
+        """
         return any(
-            t.tier == tier and t.verdict in {Verdict.PASS, Verdict.UNAVAILABLE}
+            t.tier == tier
+            and t.verdict in {Verdict.PASS, Verdict.UNAVAILABLE}
+            and not (t.metrics or {}).get("retryable")
             for t in self.tier_history
         )
 

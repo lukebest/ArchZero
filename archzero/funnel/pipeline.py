@@ -207,6 +207,13 @@ async def _run_tiers(
                 return cand
             if cand.passed_through(_tier):
                 return cand
+            from archzero.funnel.errors import (
+                infra_result,
+                is_infra_error,
+                strip_retryable_for_tier,
+            )
+
+            strip_retryable_for_tier(cand, _tier)
             try:
                 out = await _fn(cfg, cand, problem, llm)
                 log.info(
@@ -223,6 +230,8 @@ async def _run_tiers(
                 from archzero.funnel.taxonomy import attach_result
                 from archzero.models import TierResult
 
+                if is_infra_error(str(exc), exc):
+                    return attach_result(cand, infra_result(_tier, f"exception: {exc}"))
                 return attach_result(
                     cand,
                     TierResult(
@@ -361,14 +370,14 @@ async def run_campaign(
         if problem is None:
             raise ValueError(f"missing problem for campaign {resume_campaign_id}")
         unique = store.list_candidates(campaign_id=campaign.id)
-        # Resume incomplete candidates (not hard-failed past through)
-        active_seed = [
-            c
-            for c in unique
-            if c.status in {"new", "active"} or not c.hard_passed(through)
-        ]
-        if not active_seed:
-            active_seed = unique
+        from archzero.funnel.errors import needs_resume, soften_infra_failures
+
+        active_seed: list[Candidate] = []
+        for c in unique:
+            if soften_infra_failures(c):
+                store.save_candidate(c, campaign_id=campaign.id)
+            if needs_resume(c, through):
+                active_seed.append(c)
         campaign.status = "running"
         campaign.through_tier = through
         store.save_campaign(campaign)
@@ -393,6 +402,7 @@ async def run_campaign(
                     "failed": sum(1 for c in all_c if c.status == "failed"),
                     "active": len(active),
                     "resumed": True,
+                    "retried": len(active_seed),
                     "usage": store.usage_totals(campaign.id),
                 }
         except asyncio.CancelledError:

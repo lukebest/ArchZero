@@ -8,7 +8,11 @@ from archzero.models import Candidate, FailureKind, FailureRecord, Tier, TierRes
 
 
 def classify_message(message: str, tier: Tier) -> FailureKind:
+    from archzero.funnel.errors import is_infra_error
+
     m = message.lower()
+    if is_infra_error(message):
+        return FailureKind.TOOLING
     if any(k in m for k in ("bandwidth", "conservation", "amdahl", "thermodynamic", "physics")):
         return FailureKind.PHYSICS
     if "novel" in m or "reproduce" in m or "prior art" in m:
@@ -68,6 +72,10 @@ def attach_result(
             details=result.metrics,
         )
     elif result.verdict == Verdict.PASS:
+        candidate.status = "active"
+    elif result.verdict == Verdict.UNAVAILABLE and (result.metrics or {}).get(
+        "retryable"
+    ):
         candidate.status = "active"
     return candidate
 

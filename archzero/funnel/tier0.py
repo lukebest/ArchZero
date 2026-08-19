@@ -6,6 +6,7 @@ import json
 import re
 
 from archzero.config import FactoryConfig
+from archzero.funnel.errors import infra_result, is_infra_error
 from archzero.funnel.provenance import apply_llm_provenance
 from archzero.funnel.taxonomy import attach_result
 from archzero.llm.client import CursorLLM
@@ -104,6 +105,11 @@ async def evaluate_tier0_batch(
         )
         rows = data.get("results") or []
     except Exception as exc:  # noqa: BLE001
+        if is_infra_error(str(exc), exc):
+            return [
+                attach_result(c, infra_result(Tier.T0, f"tier0 batch error: {exc}"))
+                for c in candidates
+            ]
         rows = []
         data = {"error": str(exc)}
 
@@ -147,6 +153,8 @@ async def evaluate_tier0(
             await llm.complete(PERSONA, ctx, TaskClass.BULK_SCREEN, expect_json=True)
         )
     except Exception as exc:  # noqa: BLE001
+        if is_infra_error(str(exc), exc):
+            return attach_result(candidate, infra_result(Tier.T0, f"tier0 error: {exc}"))
         data = {"verdict": "fail", "summary": f"tier0 error: {exc}", "score": 0.0}
 
     return _attach(candidate, data, llm, ctx)
