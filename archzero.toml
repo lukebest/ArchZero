@@ -11,10 +11,11 @@ other_pool_max_calls = 200
 concurrency = 4
 
 [quotas]
-tier0_keep = 200
-tier1_keep = 50
-tier2_keep = 20
-tier3_keep = 8
+# Single-spec target shape: ~1K enter T0 → ~100 after T1 → ~10 after T2.
+tier0_keep = 1000
+tier1_keep = 100
+tier2_keep = 10
+tier3_keep = 5
 tier4_keep = 3
 tier5_keep = 2
 tier6_keep = 2
@@ -22,15 +23,20 @@ tier6_keep = 2
 [funnel]
 strict_evidence = true
 ensemble_n = 1
-# T1 只评议、不否决。T0 过的候选会进 T2（最多 tier1_keep 个）。
-tier1_advisory = true
-# tier0_batch_size = 10  # batch-screen large divergence pools in one call
+# T1 veto restored: FAIL blocks T2 so the funnel can cut ~1K → ~100.
+tier1_advisory = false
+tier0_batch_size = 10
 
 [divergence]
 # Cross-domain mass ideation before Tier0. n_cells LLM calls -> n_cells*per_cell ideas.
-enabled = false
+enabled = true
 n_cells = 24
 per_cell = 8
+
+[seed_library]
+# No-LLM mechanism×DOF grid supplies Tier0 volume; merged with diverge.
+enabled = true
+target_n = 1000
 
 [patent]
 # Optional module. pptx rendering needs: uv sync --extra patent

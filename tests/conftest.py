@@ -17,6 +17,11 @@ def tmp_cfg(tmp_path: Path) -> FactoryConfig:
     cfg.ensure_dirs()
     cfg.funnel.strict_evidence = True
     cfg.sim.backend = "stub"
+    # Keep unit tests small / per-candidate FakeLLM JSON; throughput tests
+    # enable seed-library + batch Tier0 explicitly.
+    cfg.seed_library.enabled = False
+    cfg.divergence.enabled = False
+    cfg.funnel.tier0_batch_size = 0
     return cfg
 
 

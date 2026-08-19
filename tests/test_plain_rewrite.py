@@ -16,7 +16,6 @@ from archzero.models import Campaign, Candidate
 from archzero.store.db import Store
 from archzero.web.app import _serialize_candidate, make_handler
 
-
 PLAIN = (
     "决策：两环冲突时固定让内环先走。\n"
     "状态：每节点 1bit 当前面。\n"

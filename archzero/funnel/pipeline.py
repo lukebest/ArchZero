@@ -171,6 +171,39 @@ def _load_seeds(seed_dir: Path, problem: ProblemPackage) -> list[Candidate]:
     return cands
 
 
+def _funnel_counts(
+    candidates: list[Candidate], through: Tier, cfg: FactoryConfig
+) -> dict[str, int]:
+    """Survivors after each tier's keep-N cut (who entered the next tier).
+
+    For the final ``through`` tier there is no next tier, so we report how many
+    passed that tier, capped at the quota (the in-memory keep cut).
+    """
+    from archzero.funnel.errors import advances_after_tier
+
+    stop_idx = TIER_ORDER.index(through)
+    counts: dict[str, int] = {"entered_t0": len(candidates)}
+    for i, tier in enumerate(TIER_ORDER[: stop_idx + 1]):
+        if i < stop_idx:
+            next_tier = TIER_ORDER[i + 1]
+            n = sum(
+                1
+                for c in candidates
+                if any(t.tier == next_tier for t in c.tier_history)
+            )
+        else:
+            n = sum(
+                1
+                for c in candidates
+                if advances_after_tier(
+                    c, tier, tier1_advisory=cfg.funnel.tier1_advisory
+                )
+                and any(t.tier == tier for t in c.tier_history)
+            )
+            n = min(n, cfg.quotas.keep_for(tier))
+        counts[f"after_{tier.value}"] = n
+    return counts
+
 
 def candidate_keep_score(candidate: Candidate, tier: Tier) -> float:
     """Sort key for the keep-N cut. Never invent MPKI=0 for off-cache work."""
@@ -364,6 +397,7 @@ async def run_campaign(
     use_divergence: bool | None = None,
     diverge_cells: int | None = None,
     diverge_per_cell: int | None = None,
+    use_seed_library: bool | None = None,
 ) -> dict[str, Any]:
     cfg.ensure_dirs()
     store = Store(cfg.db_path)
@@ -454,6 +488,9 @@ async def run_campaign(
     rounds_meta: list[dict[str, Any]] = []
 
     want_diverge = cfg.divergence.enabled if use_divergence is None else use_divergence
+    want_seeds = (
+        cfg.seed_library.enabled if use_seed_library is None else use_seed_library
+    )
 
     def _persist_idea(c: Candidate) -> None:
         if not c.workdir:
@@ -480,13 +517,39 @@ async def run_campaign(
             per_cell=diverge_per_cell or cfg.divergence.per_cell,
         )
 
+    def _collect_seed_candidates() -> list[Candidate]:
+        """Load --seed-dir and/or auto-build the no-LLM DOF grid."""
+        loaded: list[Candidate] = []
+        if seed_dir and seed_dir.is_dir():
+            loaded.extend(_load_seeds(seed_dir, problem))
+        elif want_seeds and candidates_override is None:
+            from archzero.generation.seed_library import generate_seed_library
+
+            loaded.extend(
+                generate_seed_library(
+                    problem, target_n=cfg.seed_library.target_n
+                )
+            )
+        return loaded
+
     try:
         async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
             if campaign_halted(store, campaign.id):
                 return _halted_result(store, campaign, problem, through)
+
+            seed_candidates = (
+                []
+                if candidates_override is not None
+                else _collect_seed_candidates()
+            )
+            diverge_candidates: list[Candidate] = []
+
             if candidates_override is not None:
-                candidates = candidates_override
-            elif want_diverge:
+                candidates = list(candidates_override)
+            else:
+                candidates = list(seed_candidates)
+
+            if want_diverge and candidates_override is None:
                 from archzero.generation.divergence import diverge, pool_stats
 
                 n_cells = diverge_cells or cfg.divergence.n_cells
@@ -495,11 +558,11 @@ async def run_campaign(
                     store,
                     campaign,
                     phase="diverge",
-                    generated=0,
+                    generated=len(candidates),
                     n_cells=n_cells,
                     per_cell=per_cell,
                 )
-                candidates = await diverge(
+                diverge_candidates = await diverge(
                     cfg,
                     problem,
                     n_cells=n_cells,
@@ -517,19 +580,19 @@ async def run_campaign(
                 fresh.meta["divergence"] = {
                     "n_cells": n_cells,
                     "per_cell": per_cell,
-                    "generated": len(candidates),
-                    "by_axis": pool_stats(candidates),
+                    "generated": len(diverge_candidates),
+                    "by_axis": pool_stats(diverge_candidates),
                 }
                 store.save_campaign(fresh)
                 campaign.meta = fresh.meta
                 campaign.status = fresh.status
-            elif seed_dir and seed_dir.is_dir():
-                candidates = _load_seeds(seed_dir, problem)
-            elif pdf is not None:
+                candidates = list(seed_candidates) + list(diverge_candidates)
+
+            if candidates_override is None and not candidates and pdf is not None:
                 candidates = await cleanroom_ideate(
                     cfg, pdf, problem=problem, n=n_generate, llm=llm
                 )
-            else:
+            elif candidates_override is None and not candidates:
                 from archzero.generation.cleanroom import IDEATE_PERSONA, _parse_json
 
                 candidates = []
@@ -577,6 +640,7 @@ async def run_campaign(
                         store, campaign, phase="ideate", generated=len(candidates)
                     )
 
+            raw_generated = len(candidates)
             unique: list[Candidate] = []
             seen: set[str] = set()
             allow_existing = candidates_override is not None
@@ -591,6 +655,7 @@ async def run_campaign(
                 seen.add(h)
                 _persist_idea(c)
                 unique.append(c)
+            after_hash = len(unique)
 
             # Semantic near-duplicate drop (token Jaccard) beyond exact content_hash
             deduped = dedup_candidates(unique, threshold=0.85)
@@ -604,6 +669,23 @@ async def run_campaign(
                     for d, n, score in deduped.dropped
                 ]
                 unique = deduped.kept
+            after_jaccard = len(unique)
+            campaign.meta["intake"] = {
+                "raw_generated": raw_generated,
+                "seed_library": len(seed_candidates),
+                "divergence": len(diverge_candidates),
+                "after_content_hash": after_hash,
+                "after_jaccard": after_jaccard,
+                "dedup_collapse": raw_generated - after_jaccard,
+            }
+            if seed_candidates and want_seeds:
+                campaign.meta["seed_library"] = {
+                    "enabled": True,
+                    "target_n": cfg.seed_library.target_n,
+                    "generated": len(seed_candidates),
+                    "from_seed_dir": bool(seed_dir and seed_dir.is_dir()),
+                }
+            store.save_campaign(campaign)
 
             if campaign_halted(store, campaign.id):
                 return _halted_result(store, campaign, problem, through)
@@ -685,6 +767,7 @@ async def run_campaign(
             all_c = store.list_candidates(campaign_id=campaign.id)
             passed_n = sum(1 for c in all_c if c.hard_passed(through))
             failed_n = sum(1 for c in all_c if c.status == "failed")
+            funnel_counts = _funnel_counts(all_c, through, cfg)
             result: dict[str, Any] = {
                 "campaign_id": campaign.id,
                 "problem_id": problem.id,
@@ -695,9 +778,13 @@ async def run_campaign(
                 "active": len(active),
                 "acc": acc_meta,
                 "usage": store.usage_totals(campaign.id),
+                "intake": campaign.meta.get("intake"),
+                "funnel": funnel_counts,
             }
             if campaign.meta.get("divergence"):
                 result["divergence"] = campaign.meta["divergence"]
+            if campaign.meta.get("seed_library"):
+                result["seed_library"] = campaign.meta["seed_library"]
             if frontier_result is not None:
                 result["frontier"] = {
                     "report_path": frontier_result.get("report_path"),
