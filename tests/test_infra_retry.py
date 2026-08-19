@@ -69,6 +69,25 @@ def test_resume_skips_hard_fails_and_dedup_leftovers():
     assert not needs_resume(done, Tier.T2)
 
 
+def test_advisory_t1_fail_still_advances_to_t2():
+    from archzero.funnel.errors import advances_after_tier
+
+    c = Candidate(problem_id="pp-x", title="harsh", mechanism="m")
+    c.tier_history = [
+        TierResult(tier=Tier.T0, verdict=Verdict.PASS, summary="ok", score=0.8),
+        TierResult(tier=Tier.T1, verdict=Verdict.FAIL, summary="新颖性不足", score=0.2),
+    ]
+    assert not needs_resume(c, Tier.T2)
+    assert needs_resume(c, Tier.T2, tier1_advisory=True)
+    assert advances_after_tier(c, Tier.T1, tier1_advisory=True)
+    assert not advances_after_tier(c, Tier.T1, tier1_advisory=False)
+    t0_fail = Candidate(problem_id="pp-x", title="phys", mechanism="m")
+    t0_fail.tier_history.append(
+        TierResult(tier=Tier.T0, verdict=Verdict.FAIL, summary="违反守恒", score=0.0)
+    )
+    assert not needs_resume(t0_fail, Tier.T2, tier1_advisory=True)
+
+
 @pytest.mark.asyncio
 async def test_tier1_connecterror_is_unavailable(tmp_cfg, demo_problem):
     from archzero.funnel.tier1 import evaluate_tier1
@@ -168,6 +187,57 @@ async def test_resume_only_retries_softened_infra(tmp_cfg, demo_problem, monkeyp
     assert reloaded.hard_passed(Tier.T2)
     assert store.get_candidate(phys.id).status == "failed"
     assert store.get_candidate(leftover.id).tier_history == []
+
+
+@pytest.mark.asyncio
+async def test_resume_sends_advisory_t1_fail_into_tier2(tmp_cfg, demo_problem, monkeypatch):
+    from archzero.funnel import pipeline
+    from archzero.models import Campaign
+
+    tmp_cfg.funnel.tier1_advisory = True
+    store = Store(tmp_cfg.db_path)
+    store.save_problem(demo_problem)
+    camp = Campaign(
+        name="advisory t1",
+        problem_id=demo_problem.id,
+        through_tier=Tier.T2,
+        status="done",
+    )
+    store.save_campaign(camp)
+
+    harsh = Candidate(problem_id=demo_problem.id, title="harsh", mechanism="m")
+    harsh.tier_history = [
+        TierResult(tier=Tier.T0, verdict=Verdict.PASS, summary="ok", score=0.8),
+        TierResult(tier=Tier.T1, verdict=Verdict.FAIL, summary="新颖性不足", score=0.2),
+    ]
+    harsh.status = "failed"
+    store.save_candidate(harsh, campaign_id=camp.id)
+
+    seen_t2: list[str] = []
+
+    async def fake_t1(cfg, cand, problem, llm):
+        raise AssertionError("T1 already has a hard verdict; do not re-run")
+
+    async def fake_t2(cfg, cand, problem, llm):
+        seen_t2.append(cand.title)
+        cand.tier_history.append(
+            TierResult(tier=Tier.T2, verdict=Verdict.PASS, summary="t2 ran", score=0.5)
+        )
+        cand.status = "active"
+        return cand
+
+    monkeypatch.setattr(pipeline, "CursorLLM", lambda *a, **kw: _NullLLM())
+    monkeypatch.setitem(pipeline.TIER_FNS, Tier.T1, fake_t1)
+    monkeypatch.setitem(pipeline.TIER_FNS, Tier.T2, fake_t2)
+
+    result = await pipeline.run_campaign(
+        tmp_cfg, resume_campaign_id=camp.id, through=Tier.T2
+    )
+    assert result["resumed"] is True
+    assert seen_t2 == ["harsh"]
+    reloaded = store.get_candidate(harsh.id)
+    assert reloaded is not None
+    assert reloaded.hard_passed(Tier.T2)
 
 
 class _NullLLM:

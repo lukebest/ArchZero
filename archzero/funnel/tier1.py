@@ -80,7 +80,11 @@ async def evaluate_tier1(
         "只返回 JSON："
         '{"verdict":"pass|fail","score":0-1,"summary":"...","clause_refs":[],'
         '"failure_modes":[]}\n'
-        "summary 与 failure_modes 必须原生简体中文；verdict 保持英文枚举。\n\n"
+        "summary 与 failure_modes 必须原生简体中文；verdict 保持英文枚举。\n"
+        "判 pass 的标准从宽：机制在数字 CMOS 上可实现、不违反守恒/死锁，"
+        "且能建成解析模型，就 pass。专家质疑记入 failure_modes / summary，"
+        "不要因为新颖性不足或类比刺耳而 fail。只有物理上不可实现、"
+        "正确性已死、或明显无法建模时才 fail。\n\n"
         + "\n\n".join(reviews)
     )
     try:

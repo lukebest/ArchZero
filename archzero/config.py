@@ -86,6 +86,9 @@ class FunnelConfig(BaseModel):
     # Tier0: screen N candidates per LLM call (0 = one call per candidate).
     # Only worth enabling for large divergence pools.
     tier0_batch_size: int = 0
+    # T1 is expert critique + ranking. When True it does not block T2 —
+    # T0 remains the hard physics screen. Set False to restore the old veto.
+    tier1_advisory: bool = True
 
 
 class DivergenceConfig(BaseModel):
@@ -342,6 +345,8 @@ strict_acc = true
 ensemble_n = 1
 use_verifiers = true
 llm_dedicated_sim = false
+# T1 critiques but does not veto; T0 passers still enter T2.
+tier1_advisory = true
 # tier0_batch_size = 10  # batch-screen large divergence pools in one call
 
 [divergence]

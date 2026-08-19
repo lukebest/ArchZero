@@ -205,13 +205,15 @@ async def _run_tiers(
         async def run_one(cand: Candidate, _fn=fn, _tier=tier) -> Candidate:
             if campaign_halted(store, campaign.id):
                 return cand
-            if cand.passed_through(_tier):
-                return cand
             from archzero.funnel.errors import (
                 infra_result,
                 is_infra_error,
                 strip_retryable_for_tier,
+                tier_settled,
             )
+
+            if tier_settled(cand, _tier):
+                return cand
 
             strip_retryable_for_tier(cand, _tier)
             try:
@@ -327,7 +329,11 @@ async def _run_tiers(
         active = next_active
 
         def _passed_tier(c: Candidate, t: Tier = tier) -> bool:
-            return c.passed_through(t)
+            from archzero.funnel.errors import advances_after_tier
+
+            return advances_after_tier(
+                c, t, tier1_advisory=cfg.funnel.tier1_advisory
+            )
 
         passed = [c for c in active if _passed_tier(c)]
 
@@ -376,7 +382,9 @@ async def run_campaign(
         for c in unique:
             if soften_infra_failures(c):
                 store.save_candidate(c, campaign_id=campaign.id)
-            if needs_resume(c, through):
+            if needs_resume(
+                c, through, tier1_advisory=cfg.funnel.tier1_advisory
+            ):
                 active_seed.append(c)
         campaign.status = "running"
         campaign.through_tier = through

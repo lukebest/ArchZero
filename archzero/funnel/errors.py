@@ -87,25 +87,69 @@ def soften_infra_failures(candidate: Candidate) -> bool:
     return True
 
 
-def needs_resume(candidate: Candidate, through: Tier) -> bool:
+def needs_resume(
+    candidate: Candidate,
+    through: Tier,
+    *,
+    tier1_advisory: bool = False,
+) -> bool:
     """True when resume should spend another LLM call on this candidate.
 
     Dedup leftovers (no history) and hard FAILs stay out. Retryable
-    infrastructure gaps and mid-funnel stops come back in.
+    infrastructure gaps and mid-funnel stops come back in. A T1 FAIL is
+    not terminal when ``tier1_advisory`` — T2 can still run.
     """
     if candidate.hard_passed(through):
         return False
     if not candidate.tier_history:
         return False
-    if any(t.verdict == Verdict.FAIL for t in candidate.tier_history):
-        return False
     if any(is_retryable_result(t) for t in candidate.tier_history):
         return True
+    hard_fails = [
+        t
+        for t in candidate.tier_history
+        if t.verdict == Verdict.FAIL
+        and not (tier1_advisory and t.tier == Tier.T1)
+    ]
+    if hard_fails:
+        return False
     last = candidate.last_tier()
-    if last is None or last.verdict != Verdict.PASS:
+    if last is None:
+        return False
+    if last.verdict not in {Verdict.PASS, Verdict.UNAVAILABLE} and not (
+        tier1_advisory and last.tier == Tier.T1 and last.verdict == Verdict.FAIL
+    ):
         return False
     return _TIER_ORDER.index(last.tier) < _TIER_ORDER.index(through)
 
 
-def resume_pool(candidates: list[Candidate], through: Tier) -> list[Candidate]:
-    return [c for c in candidates if needs_resume(c, through)]
+def resume_pool(
+    candidates: list[Candidate],
+    through: Tier,
+    *,
+    tier1_advisory: bool = False,
+) -> list[Candidate]:
+    return [
+        c
+        for c in candidates
+        if needs_resume(c, through, tier1_advisory=tier1_advisory)
+    ]
+
+
+def tier_settled(candidate: Candidate, tier: Tier) -> bool:
+    """True when this tier already has a non-retryable verdict."""
+    return any(
+        t.tier == tier and not is_retryable_result(t) for t in candidate.tier_history
+    )
+
+
+def advances_after_tier(
+    candidate: Candidate,
+    tier: Tier,
+    *,
+    tier1_advisory: bool = False,
+) -> bool:
+    """Whether this candidate may enter the next tier after ``tier`` ran."""
+    if tier is Tier.T1 and tier1_advisory:
+        return True
+    return candidate.passed_through(tier)

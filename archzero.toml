@@ -22,6 +22,8 @@ tier6_keep = 2
 [funnel]
 strict_evidence = true
 ensemble_n = 1
+# T1 只评议、不否决。T0 过的候选会进 T2（最多 tier1_keep 个）。
+tier1_advisory = true
 # tier0_batch_size = 10  # batch-screen large divergence pools in one call
 
 [divergence]
