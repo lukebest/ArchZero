@@ -149,6 +149,40 @@ class Store:
             ).fetchall()
         return [Campaign.model_validate_json(r["json"]) for r in rows]
 
+    def stop_campaign(self, cid: str) -> Campaign | None:
+        """Mark a running campaign stopped so the funnel exits cooperatively."""
+        camp = self.get_campaign(cid)
+        if camp is None:
+            return None
+        if camp.status == "running":
+            camp.status = "stopped"
+            self.save_campaign(camp)
+        return camp
+
+    def delete_campaign(self, cid: str) -> None:
+        """Remove a campaign and its candidates / failures / usage.
+
+        Running campaigns must be stopped first so a live ``flow`` process
+        cannot keep writing into a deleted row.
+        """
+        camp = self.get_campaign(cid)
+        if camp is None:
+            raise KeyError(cid)
+        if camp.status == "running":
+            raise ValueError("stop the campaign before deleting")
+        cands = self.list_candidates(campaign_id=cid)
+        ids = [c.id for c in cands]
+        with self._conn() as conn:
+            if ids:
+                marks = ",".join("?" * len(ids))
+                conn.execute(
+                    f"DELETE FROM failures WHERE candidate_id IN ({marks})",
+                    ids,
+                )
+            conn.execute("DELETE FROM usage_events WHERE campaign_id=?", (cid,))
+            conn.execute("DELETE FROM candidates WHERE campaign_id=?", (cid,))
+            conn.execute("DELETE FROM campaigns WHERE id=?", (cid,))
+
     # --- candidates ---
     def save_candidate(self, cand: Candidate, campaign_id: str | None = None) -> None:
         cand.updated_at = datetime.now(timezone.utc)

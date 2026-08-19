@@ -569,22 +569,31 @@ def flow_cmd(
         console.print(f"[yellow]lint[/yellow] {issue}")
     console.print(f"[green]spec[/green] {pp.id} — {len(pp.clauses)} clauses")
 
-    result = asyncio.run(
-        run_campaign(
-            cfg,
-            spec_path=spec,
-            through=through_tier,
-            use_divergence=True,
-            diverge_cells=cells,
-            diverge_per_cell=per_cell,
+    try:
+        result = asyncio.run(
+            run_campaign(
+                cfg,
+                spec_path=spec,
+                through=through_tier,
+                use_divergence=True,
+                diverge_cells=cells,
+                diverge_per_cell=per_cell,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        console.print("[yellow]interrupted[/yellow] 进行中的轮次可在看板点「停止」后删除")
+        raise typer.Exit(code=130) from None
     campaign_id = result["campaign_id"]
     dv = result.get("divergence") or {}
     console.print(
         f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
         f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
     )
+    if result.get("stopped"):
+        console.print(
+            f"[yellow]stopped[/yellow] campaign {campaign_id} — 看板可删除该轮"
+        )
+        return
     _print_acc_notice(result)
     console.print(
         f"[green]funnel[/green] {campaign_id} passed={result['passed']} "
@@ -877,6 +886,44 @@ def status_cmd(
     usage = store.usage_totals(campaign)
     if usage:
         console.print(f"usage pools: {usage}")
+
+
+@app.command("stop")
+def stop_cmd(
+    ctx: typer.Context,
+    campaign: str = typer.Argument(..., help="Campaign id"),
+) -> None:
+    """Ask a running campaign to halt; the funnel exits at the next checkpoint."""
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+    camp = store.stop_campaign(campaign)
+    if camp is None:
+        console.print(f"[red]unknown campaign[/red] {campaign}")
+        raise typer.Exit(code=1)
+    console.print(f"[yellow]stop[/yellow] {camp.id}  status={camp.status}")
+
+
+@app.command("rm-campaign")
+def rm_campaign_cmd(
+    ctx: typer.Context,
+    campaign: str = typer.Argument(..., help="Campaign id"),
+) -> None:
+    """Delete a stopped / done / failed campaign and its candidates."""
+    from archzero.store.db import Store
+
+    cfg = _cfg(ctx.obj.get("config_path"))
+    store = Store(cfg.db_path)
+    try:
+        store.delete_campaign(campaign)
+    except KeyError:
+        console.print(f"[red]unknown campaign[/red] {campaign}")
+        raise typer.Exit(code=1)
+    except ValueError as exc:
+        console.print(f"[red]cannot delete[/red] {exc}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]deleted[/green] campaign {campaign}")
 
 
 @app.command("show")

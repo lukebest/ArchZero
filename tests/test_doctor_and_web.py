@@ -1,4 +1,9 @@
+import json
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from archzero.config import FactoryConfig
 from archzero.doctor import run_doctor
@@ -96,3 +101,53 @@ def test_dashboard_exposes_acc_verdict_for_a_campaign(tmp_path):
     index = (root / "archzero" / "web" / "static" / "index.html").read_text("utf-8")
     assert "renderAcc(data.acc)" in index, "banner must be wired into campaign render"
     assert "report_only" in index
+    assert "stopCampaign" in index
+    assert "deleteCampaign" in index
+    assert "schedulePoll" in index
+
+
+def _http(httpd, method: str, path: str):
+    url = f"http://127.0.0.1:{httpd.server_address[1]}{path}"
+    req = Request(url, method=method)
+    try:
+        with urlopen(req, timeout=5) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode())
+
+
+def test_store_and_api_stop_then_delete(tmp_path):
+    cfg = FactoryConfig(state_dir=tmp_path / "state")
+    cfg.ensure_dirs()
+    store = Store(cfg.db_path)
+    camp = Campaign(name="live", problem_id="pp-x", status="running")
+    store.save_campaign(camp)
+    cand = Candidate(problem_id="pp-x", title="t", mechanism="m")
+    store.save_candidate(cand, campaign_id=camp.id)
+
+    Handler = make_handler(cfg)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        code, body = _http(httpd, "DELETE", f"/api/campaigns/{camp.id}")
+        assert code == 409
+        assert "stop" in body["error"]
+
+        code, body = _http(httpd, "POST", f"/api/campaigns/{camp.id}/stop")
+        assert code == 200
+        assert body["status"] == "stopped"
+        assert store.get_campaign(camp.id).status == "stopped"
+
+        code, body = _http(httpd, "GET", "/api/campaigns")
+        assert code == 200
+        row = next(c for c in body if c["id"] == camp.id)
+        assert row["n_candidates"] == 1
+
+        code, body = _http(httpd, "DELETE", f"/api/campaigns/{camp.id}")
+        assert code == 200
+        assert store.get_campaign(camp.id) is None
+        assert store.list_candidates(campaign_id=camp.id) == []
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

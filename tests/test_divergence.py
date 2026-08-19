@@ -170,3 +170,44 @@ async def test_run_campaign_feeds_the_funnel_from_the_matrix(
     # Titles repeat across cells, so dedup collapses them before Tier0.
     assert result["generated"] >= 1
     assert result["passed"] >= 1
+    assert not result.get("stopped")
+
+
+@pytest.mark.asyncio
+async def test_stop_during_diverge_skips_the_funnel(
+    tmp_cfg, demo_problem, monkeypatch
+):
+    from archzero.funnel import pipeline
+    from archzero.generation import divergence as divmod
+    from archzero.models import Tier
+    from archzero.store.db import Store
+
+    llm = _CtxFakeLLM(responses={"ideate": _ideas_json(2)})
+    monkeypatch.setattr(pipeline, "CursorLLM", lambda *a, **kw: llm)
+
+    real = divmod.diverge
+
+    async def diverge_then_stop(*args, **kwargs):
+        out = await real(*args, **kwargs)
+        store = Store(tmp_cfg.db_path)
+        for camp in store.list_campaigns():
+            if camp.status == "running":
+                store.stop_campaign(camp.id)
+        return out
+
+    monkeypatch.setattr(divmod, "diverge", diverge_then_stop)
+
+    result = await pipeline.run_campaign(
+        tmp_cfg,
+        problem=demo_problem,
+        through=Tier.T2,
+        use_divergence=True,
+        diverge_cells=2,
+        diverge_per_cell=2,
+    )
+    assert result["stopped"] is True
+    store = Store(tmp_cfg.db_path)
+    camp = store.get_campaign(result["campaign_id"])
+    assert camp is not None
+    assert camp.status == "stopped"
+    assert store.list_candidates(campaign_id=camp.id)

@@ -36,11 +36,14 @@ class LocalWorkerPool:
         self,
         jobs: list[WorkerJob[T]],
         handler: Callable[[WorkerJob[T]], Awaitable[R]],
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[WorkerResult[R]]:
         sem = asyncio.Semaphore(self.concurrency)
 
         async def _one(job: WorkerJob[T]) -> WorkerResult[R]:
             async with sem:
+                if should_stop is not None and should_stop():
+                    return WorkerResult(job_id=job.id, ok=True, value=None)
                 try:
                     value = await handler(job)
                     return WorkerResult(job_id=job.id, ok=True, value=value)

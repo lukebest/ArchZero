@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -50,6 +51,54 @@ TIER_FNS: dict[Tier, TierFn] = {
     Tier.T5: evaluate_tier5,
     Tier.T6: evaluate_tier6,
 }
+
+HALTED = frozenset({"stopped", "paused"})
+
+
+def campaign_halted(store: Store, campaign_id: str) -> bool:
+    camp = store.get_campaign(campaign_id)
+    return camp is None or camp.status in HALTED
+
+
+def _sync_progress(store: Store, campaign: Campaign, **fields: Any) -> bool:
+    """Write progress without clobbering a dashboard stop. True if halted."""
+    fresh = store.get_campaign(campaign.id)
+    if fresh is None:
+        return True
+    if fresh.status in HALTED:
+        campaign.status = fresh.status
+        campaign.meta = fresh.meta
+        return True
+    meta = dict(fresh.meta or {})
+    progress = dict(meta.get("progress") or {})
+    progress.update(fields)
+    meta["progress"] = progress
+    fresh.meta = meta
+    store.save_campaign(fresh)
+    campaign.meta = meta
+    campaign.status = fresh.status
+    return False
+
+
+def _halted_result(
+    store: Store, campaign: Campaign, problem: ProblemPackage, through: Tier
+) -> dict[str, Any]:
+    campaign.status = "stopped"
+    store.save_campaign(campaign)
+    all_c = store.list_candidates(campaign_id=campaign.id)
+    return {
+        "campaign_id": campaign.id,
+        "problem_id": problem.id,
+        "through": through.value,
+        "generated": len(all_c),
+        "passed": sum(1 for c in all_c if c.hard_passed(through)),
+        "failed": sum(1 for c in all_c if c.status == "failed"),
+        "active": sum(1 for c in all_c if c.status in {"new", "active"}),
+        "stopped": True,
+        "usage": store.usage_totals(campaign.id),
+        "acc": (campaign.meta or {}).get("acc"),
+        "divergence": (campaign.meta or {}).get("divergence"),
+    }
 
 
 def _content_hash(title: str, mechanism: str) -> str:
@@ -146,10 +195,16 @@ async def _run_tiers(
 ) -> list[Candidate]:
     stop_idx = TIER_ORDER.index(through)
     for tier in TIER_ORDER[: stop_idx + 1]:
+        if campaign_halted(store, campaign.id):
+            return active
+        if _sync_progress(store, campaign, phase="funnel", tier=tier.value):
+            return active
         keep = cfg.quotas.keep_for(tier)
         fn = TIER_FNS[tier]
 
         async def run_one(cand: Candidate, _fn=fn, _tier=tier) -> Candidate:
+            if campaign_halted(store, campaign.id):
+                return cand
             if cand.passed_through(_tier):
                 return cand
             try:
@@ -211,7 +266,13 @@ async def _run_tiers(
                 WorkerJob(id=f"batch-{i}", payload=chunk)
                 for i, chunk in enumerate(chunks)
             ]
-            for i, res in enumerate(await pool.map(batch_jobs, _handle_batch)):
+            for i, res in enumerate(
+                await pool.map(
+                    batch_jobs,
+                    _handle_batch,
+                    should_stop=lambda: campaign_halted(store, campaign.id),
+                )
+            ):
                 if res.ok and res.value is not None:
                     for out in res.value:
                         done_by_id[out.id] = out
@@ -224,7 +285,11 @@ async def _run_tiers(
                 return _persist(await run_one(job.payload))
 
             jobs = [WorkerJob(id=c.id, payload=c) for c in active]
-            for res in await pool.map(jobs, _handle):
+            for res in await pool.map(
+                jobs,
+                _handle,
+                should_stop=lambda: campaign_halted(store, campaign.id),
+            ):
                 if res.ok and res.value is not None:
                     done_by_id[res.job_id] = res.value
                 else:
@@ -307,25 +372,35 @@ async def run_campaign(
         campaign.status = "running"
         campaign.through_tier = through
         store.save_campaign(campaign)
-        frontier_result: dict[str, Any] | None = None
-        async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
-            active = await _run_tiers(
-                cfg, store, campaign, problem, llm, active_seed, through
-            )
-            campaign.status = "done"
+        try:
+            async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
+                if campaign_halted(store, campaign.id):
+                    return _halted_result(store, campaign, problem, through)
+                active = await _run_tiers(
+                    cfg, store, campaign, problem, llm, active_seed, through
+                )
+                if campaign_halted(store, campaign.id):
+                    return _halted_result(store, campaign, problem, through)
+                campaign.status = "done"
+                store.save_campaign(campaign)
+                all_c = store.list_candidates(campaign_id=campaign.id)
+                return {
+                    "campaign_id": campaign.id,
+                    "problem_id": problem.id,
+                    "through": through.value,
+                    "generated": len(unique),
+                    "passed": sum(1 for c in all_c if c.hard_passed(through)),
+                    "failed": sum(1 for c in all_c if c.status == "failed"),
+                    "active": len(active),
+                    "resumed": True,
+                    "usage": store.usage_totals(campaign.id),
+                }
+        except asyncio.CancelledError:
+            return _halted_result(store, campaign, problem, through)
+        except Exception:
+            campaign.status = "failed"
             store.save_campaign(campaign)
-            all_c = store.list_candidates(campaign_id=campaign.id)
-            return {
-                "campaign_id": campaign.id,
-                "problem_id": problem.id,
-                "through": through.value,
-                "generated": len(unique),
-                "passed": sum(1 for c in all_c if c.hard_passed(through)),
-                "failed": sum(1 for c in all_c if c.status == "failed"),
-                "active": len(active),
-                "resumed": True,
-                "usage": store.usage_totals(campaign.id),
-            }
+            raise
 
     if problem is None:
         if spec_path is None:
@@ -347,10 +422,12 @@ async def run_campaign(
         name=name or f"{problem.title} → {through.value}",
         problem_id=problem.id,
         through_tier=through,
+        status="running",
         meta={
             "expand_frontier": expand_frontier,
             "auto_round": auto_round,
             "acc": acc_meta,
+            "progress": {"phase": "start", "generated": 0},
         },
     )
     store.save_campaign(campaign)
@@ -360,67 +437,115 @@ async def run_campaign(
 
     want_diverge = cfg.divergence.enabled if use_divergence is None else use_divergence
 
-    async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
-        if candidates_override is not None:
-            candidates = candidates_override
-        elif want_diverge:
-            from archzero.generation.divergence import diverge, pool_stats
+    def _persist_idea(c: Candidate) -> None:
+        if not c.workdir:
+            work = cfg.scratch_dir / "campaigns" / campaign.id / c.id
+            work.mkdir(parents=True, exist_ok=True)
+            c.workdir = str(work)
+        store.save_candidate(c, campaign_id=campaign.id)
 
-            candidates = await diverge(
-                cfg,
-                problem,
-                n_cells=diverge_cells or cfg.divergence.n_cells,
-                per_cell=diverge_per_cell or cfg.divergence.per_cell,
-                lens_ids=cfg.divergence.lens_whitelist or None,
-                domain_ids=cfg.divergence.domain_whitelist or None,
-                llm=llm,
-            )
-            campaign.meta["divergence"] = {
-                "n_cells": diverge_cells or cfg.divergence.n_cells,
-                "per_cell": diverge_per_cell or cfg.divergence.per_cell,
-                "generated": len(candidates),
-                "by_axis": pool_stats(candidates),
-            }
-        elif seed_dir and seed_dir.is_dir():
-            candidates = _load_seeds(seed_dir, problem)
-        elif pdf is not None:
-            candidates = await cleanroom_ideate(
-                cfg, pdf, problem=problem, n=n_generate, llm=llm
-            )
-        else:
-            from archzero.generation.cleanroom import IDEATE_PERSONA, _parse_json
+    def _on_diverge_cell(cands: list[Candidate]) -> None:
+        for c in cands:
+            h = c.content_hash or _content_hash(c.title, c.mechanism)
+            c.content_hash = h
+            prior = store.find_by_hash(h)
+            if prior is not None and prior.id != c.id:
+                continue
+            _persist_idea(c)
+        n = len(store.list_candidates(campaign_id=campaign.id))
+        _sync_progress(
+            store,
+            campaign,
+            phase="diverge",
+            generated=n,
+            n_cells=diverge_cells or cfg.divergence.n_cells,
+            per_cell=diverge_per_cell or cfg.divergence.per_cell,
+        )
 
-            candidates = []
-            for i in range(n_generate):
-                prompt = (
-                    f"Independent generation #{i + 1}. Explore DOF in the problem.\n"
-                    f"Write title/mechanism/expected_effect/risks in Simplified Chinese.\n"
-                    f"TITLE: {problem.title}\n"
-                    + "\n".join(f"{c.id}: {c.text}" for c in problem.clauses)
+    try:
+        async with CursorLLM(cfg, store=store, campaign_id=campaign.id) as llm:
+            if campaign_halted(store, campaign.id):
+                return _halted_result(store, campaign, problem, through)
+            if candidates_override is not None:
+                candidates = candidates_override
+            elif want_diverge:
+                from archzero.generation.divergence import diverge, pool_stats
+
+                n_cells = diverge_cells or cfg.divergence.n_cells
+                per_cell = diverge_per_cell or cfg.divergence.per_cell
+                _sync_progress(
+                    store,
+                    campaign,
+                    phase="diverge",
+                    generated=0,
+                    n_cells=n_cells,
+                    per_cell=per_cell,
                 )
-                try:
-                    data = _parse_json(
-                        await llm.complete(
-                            IDEATE_PERSONA,
-                            prompt,
-                            TaskClass.IDEATE,
-                            expect_json=True,
-                        )
+                candidates = await diverge(
+                    cfg,
+                    problem,
+                    n_cells=n_cells,
+                    per_cell=per_cell,
+                    lens_ids=cfg.divergence.lens_whitelist or None,
+                    domain_ids=cfg.divergence.domain_whitelist or None,
+                    llm=llm,
+                    on_candidates=_on_diverge_cell,
+                    should_stop=lambda: campaign_halted(store, campaign.id),
+                )
+                fresh = store.get_campaign(campaign.id)
+                if fresh is None or fresh.status in HALTED:
+                    return _halted_result(store, fresh or campaign, problem, through)
+                fresh.meta = dict(fresh.meta or {})
+                fresh.meta["divergence"] = {
+                    "n_cells": n_cells,
+                    "per_cell": per_cell,
+                    "generated": len(candidates),
+                    "by_axis": pool_stats(candidates),
+                }
+                store.save_campaign(fresh)
+                campaign.meta = fresh.meta
+                campaign.status = fresh.status
+            elif seed_dir and seed_dir.is_dir():
+                candidates = _load_seeds(seed_dir, problem)
+            elif pdf is not None:
+                candidates = await cleanroom_ideate(
+                    cfg, pdf, problem=problem, n=n_generate, llm=llm
+                )
+            else:
+                from archzero.generation.cleanroom import IDEATE_PERSONA, _parse_json
+
+                candidates = []
+                for i in range(n_generate):
+                    if campaign_halted(store, campaign.id):
+                        return _halted_result(store, campaign, problem, through)
+                    prompt = (
+                        f"Independent generation #{i + 1}. Explore DOF in the problem.\n"
+                        f"Write title/mechanism/expected_effect/risks in Simplified Chinese.\n"
+                        f"TITLE: {problem.title}\n"
+                        + "\n".join(f"{c.id}: {c.text}" for c in problem.clauses)
                     )
-                except Exception as exc:  # noqa: BLE001
-                    data = {
-                        "title": f"启发式候选 {i + 1}",
-                        "family": "prefetch",
-                        "mechanism": (
-                            f"生成失败，使用回退机制说明：{exc}。"
-                            "建议采用死块预测器（dead-block predictor）"
-                            "并配合过滤式预取（filtered prefetch）。"
-                        ),
-                    }
-                title = str(data.get("title") or f"候选 {i + 1}")
-                mechanism = str(data.get("mechanism") or "")
-                candidates.append(
-                    Candidate(
+                    try:
+                        data = _parse_json(
+                            await llm.complete(
+                                IDEATE_PERSONA,
+                                prompt,
+                                TaskClass.IDEATE,
+                                expect_json=True,
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        data = {
+                            "title": f"启发式候选 {i + 1}",
+                            "family": "prefetch",
+                            "mechanism": (
+                                f"生成失败，使用回退机制说明：{exc}。"
+                                "建议采用死块预测器（dead-block predictor）"
+                                "并配合过滤式预取（filtered prefetch）。"
+                            ),
+                        }
+                    title = str(data.get("title") or f"候选 {i + 1}")
+                    mechanism = str(data.get("mechanism") or "")
+                    cand = Candidate(
                         problem_id=problem.id,
                         title=title,
                         mechanism=mechanism,
@@ -428,135 +553,148 @@ async def run_campaign(
                         clause_refs=list(data.get("clause_refs") or []),
                         content_hash=_content_hash(title, mechanism),
                     )
-                )
-
-        unique: list[Candidate] = []
-        seen: set[str] = set()
-        allow_existing = candidates_override is not None
-        for c in candidates:
-            h = c.content_hash or _content_hash(c.title, c.mechanism)
-            c.content_hash = h
-            if h in seen:
-                continue
-            if not allow_existing and store.find_by_hash(h):
-                continue
-            seen.add(h)
-            if not c.workdir:
-                work = cfg.scratch_dir / "campaigns" / campaign.id / c.id
-                work.mkdir(parents=True, exist_ok=True)
-                c.workdir = str(work)
-            store.save_candidate(c, campaign_id=campaign.id)
-            unique.append(c)
-
-        # Semantic near-duplicate drop (token Jaccard) beyond exact content_hash
-        deduped = dedup_candidates(unique, threshold=0.85)
-        if deduped.dropped:
-            campaign.meta["dedup_dropped"] = [
-                {
-                    "dropped": d.id,
-                    "near": n.id,
-                    "score": round(score, 3),
-                }
-                for d, n, score in deduped.dropped
-            ]
-            unique = deduped.kept
-
-        active = await _run_tiers(cfg, store, campaign, problem, llm, unique, through)
-
-        async def _do_frontier(pp: ProblemPackage) -> dict[str, Any]:
-            from archzero.funnel.taxonomy import failures_as_signals
-            from archzero.generation.frontier import expand_frontier as do_expand
-
-            fails = store.list_failures(campaign_id=campaign.id)
-            signals = failures_as_signals(fails)
-            out_dir = cfg.scratch_dir / "campaigns" / campaign.id / "frontier"
-            return await do_expand(
-                cfg,
-                pp,
-                signals=signals,
-                out_dir=out_dir,
-                llm=None if frontier_offline else llm,
-                offline=frontier_offline,
-            )
-
-        if expand_frontier:
-            frontier_result = await _do_frontier(problem)
-            for pp in frontier_result.get("packages") or []:
-                store.save_problem(pp)
-            campaign.meta["frontier_report"] = frontier_result.get("report_path")
-            campaign.meta["paradigm_candidates"] = [
-                c.id for c in (frontier_result.get("candidates") or [])
-            ]
-
-            # Auto rounds: run funnel on expanded problem packages
-            from archzero.metrics.elimination import compute_elimination, snapshot_failures
-
-            for r in range(max(0, auto_round)):
-                packages = list(frontier_result.get("packages") or [])
-                if not packages:
-                    break
-                pp = packages[min(r, len(packages) - 1)]
-                round_name = f"{campaign.name} · frontier-round-{r + 1}"
-                baseline_snap = snapshot_failures(store.list_failures(campaign_id=campaign.id))
-                sub = await run_campaign(
-                    cfg,
-                    problem=pp,
-                    through=through,
-                    name=round_name,
-                    n_generate=max(3, n_generate // 2),
-                    expand_frontier=False,
-                    auto_round=0,
-                )
-                follow_id = sub.get("campaign_id")
-                if follow_id:
-                    elim = compute_elimination(
-                        store,
-                        source_campaign_id=campaign.id,
-                        followup_campaign_id=follow_id,
+                    candidates.append(cand)
+                    _persist_idea(cand)
+                    _sync_progress(
+                        store, campaign, phase="ideate", generated=len(candidates)
                     )
-                    sub["elimination"] = elim
-                    sub["source_failures"] = baseline_snap
-                    sub["parent_campaign_id"] = campaign.id
-                    follow_camp = store.get_campaign(follow_id)
-                    if follow_camp is not None:
-                        follow_camp.meta["parent_campaign_id"] = campaign.id
-                        follow_camp.meta["source_failures"] = baseline_snap
-                        follow_camp.meta["elimination"] = elim
-                        store.save_campaign(follow_camp)
-                rounds_meta.append(sub)
-                # Expand again from latest
-                if r + 1 < auto_round:
-                    frontier_result = await _do_frontier(pp)
-                    for npp in frontier_result.get("packages") or []:
-                        store.save_problem(npp)
 
-        campaign.status = "done"
-        store.save_campaign(campaign)
+            unique: list[Candidate] = []
+            seen: set[str] = set()
+            allow_existing = candidates_override is not None
+            for c in candidates:
+                h = c.content_hash or _content_hash(c.title, c.mechanism)
+                c.content_hash = h
+                if h in seen:
+                    continue
+                prior = store.find_by_hash(h)
+                if not allow_existing and prior is not None and prior.id != c.id:
+                    continue
+                seen.add(h)
+                _persist_idea(c)
+                unique.append(c)
 
-        all_c = store.list_candidates(campaign_id=campaign.id)
-        passed_n = sum(1 for c in all_c if c.hard_passed(through))
-        failed_n = sum(1 for c in all_c if c.status == "failed")
-        result: dict[str, Any] = {
-            "campaign_id": campaign.id,
-            "problem_id": problem.id,
-            "through": through.value,
-            "generated": len(unique),
-            "passed": passed_n,
-            "failed": failed_n,
-            "active": len(active),
-            "acc": acc_meta,
-            "usage": store.usage_totals(campaign.id),
-        }
-        if campaign.meta.get("divergence"):
-            result["divergence"] = campaign.meta["divergence"]
-        if frontier_result is not None:
-            result["frontier"] = {
-                "report_path": frontier_result.get("report_path"),
-                "n_packages": len(frontier_result.get("packages") or []),
-                "n_paradigm_candidates": len(frontier_result.get("candidates") or []),
-                "offline": frontier_result.get("offline"),
-                "kinds": [c.kind for c in (frontier_result.get("candidates") or [])],
+            # Semantic near-duplicate drop (token Jaccard) beyond exact content_hash
+            deduped = dedup_candidates(unique, threshold=0.85)
+            if deduped.dropped:
+                campaign.meta["dedup_dropped"] = [
+                    {
+                        "dropped": d.id,
+                        "near": n.id,
+                        "score": round(score, 3),
+                    }
+                    for d, n, score in deduped.dropped
+                ]
+                unique = deduped.kept
+
+            if campaign_halted(store, campaign.id):
+                return _halted_result(store, campaign, problem, through)
+
+            active = await _run_tiers(cfg, store, campaign, problem, llm, unique, through)
+            if campaign_halted(store, campaign.id):
+                return _halted_result(store, campaign, problem, through)
+
+            async def _do_frontier(pp: ProblemPackage) -> dict[str, Any]:
+                from archzero.funnel.taxonomy import failures_as_signals
+                from archzero.generation.frontier import expand_frontier as do_expand
+
+                fails = store.list_failures(campaign_id=campaign.id)
+                signals = failures_as_signals(fails)
+                out_dir = cfg.scratch_dir / "campaigns" / campaign.id / "frontier"
+                return await do_expand(
+                    cfg,
+                    pp,
+                    signals=signals,
+                    out_dir=out_dir,
+                    llm=None if frontier_offline else llm,
+                    offline=frontier_offline,
+                )
+
+            if expand_frontier:
+                frontier_result = await _do_frontier(problem)
+                for pp in frontier_result.get("packages") or []:
+                    store.save_problem(pp)
+                campaign.meta["frontier_report"] = frontier_result.get("report_path")
+                campaign.meta["paradigm_candidates"] = [
+                    c.id for c in (frontier_result.get("candidates") or [])
+                ]
+
+                from archzero.metrics.elimination import compute_elimination, snapshot_failures
+
+                for r in range(max(0, auto_round)):
+                    packages = list(frontier_result.get("packages") or [])
+                    if not packages:
+                        break
+                    pp = packages[min(r, len(packages) - 1)]
+                    round_name = f"{campaign.name} · frontier-round-{r + 1}"
+                    baseline_snap = snapshot_failures(store.list_failures(campaign_id=campaign.id))
+                    sub = await run_campaign(
+                        cfg,
+                        problem=pp,
+                        through=through,
+                        name=round_name,
+                        n_generate=max(3, n_generate // 2),
+                        expand_frontier=False,
+                        auto_round=0,
+                    )
+                    follow_id = sub.get("campaign_id")
+                    if follow_id:
+                        elim = compute_elimination(
+                            store,
+                            source_campaign_id=campaign.id,
+                            followup_campaign_id=follow_id,
+                        )
+                        sub["elimination"] = elim
+                        sub["source_failures"] = baseline_snap
+                        sub["parent_campaign_id"] = campaign.id
+                        follow_camp = store.get_campaign(follow_id)
+                        if follow_camp is not None:
+                            follow_camp.meta["parent_campaign_id"] = campaign.id
+                            follow_camp.meta["source_failures"] = baseline_snap
+                            follow_camp.meta["elimination"] = elim
+                            store.save_campaign(follow_camp)
+                    rounds_meta.append(sub)
+                    if r + 1 < auto_round:
+                        frontier_result = await _do_frontier(pp)
+                        for npp in frontier_result.get("packages") or []:
+                            store.save_problem(npp)
+
+            if campaign_halted(store, campaign.id):
+                return _halted_result(store, campaign, problem, through)
+            campaign.status = "done"
+            store.save_campaign(campaign)
+
+            all_c = store.list_candidates(campaign_id=campaign.id)
+            passed_n = sum(1 for c in all_c if c.hard_passed(through))
+            failed_n = sum(1 for c in all_c if c.status == "failed")
+            result: dict[str, Any] = {
+                "campaign_id": campaign.id,
+                "problem_id": problem.id,
+                "through": through.value,
+                "generated": len(unique),
+                "passed": passed_n,
+                "failed": failed_n,
+                "active": len(active),
+                "acc": acc_meta,
+                "usage": store.usage_totals(campaign.id),
             }
-        if rounds_meta:
-            result["auto_rounds"] = rounds_meta
-        return result
+            if campaign.meta.get("divergence"):
+                result["divergence"] = campaign.meta["divergence"]
+            if frontier_result is not None:
+                result["frontier"] = {
+                    "report_path": frontier_result.get("report_path"),
+                    "n_packages": len(frontier_result.get("packages") or []),
+                    "n_paradigm_candidates": len(frontier_result.get("candidates") or []),
+                    "offline": frontier_result.get("offline"),
+                    "kinds": [c.kind for c in (frontier_result.get("candidates") or [])],
+                }
+            if rounds_meta:
+                result["auto_rounds"] = rounds_meta
+            return result
+    except asyncio.CancelledError:
+        return _halted_result(store, campaign, problem, through)
+    except Exception:
+        if campaign.status == "running":
+            campaign.status = "failed"
+            store.save_campaign(campaign)
+        raise

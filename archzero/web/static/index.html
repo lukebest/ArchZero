@@ -98,6 +98,10 @@
     color: #fff;
   }
   .btn.ghost { box-shadow: none; background: transparent; }
+  .btn.danger { color: var(--fail); border-color: #e8b4af; }
+  .btn.danger:hover { border-color: var(--fail); background: var(--fail-soft); }
+  .camp-row { display: grid; grid-template-columns: auto 1fr; gap: 0.45rem; align-items: stretch; }
+  .camp-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 
   .howto {
     background: var(--panel);
@@ -485,10 +489,10 @@
     <details open>
       <summary>怎么读这个看板？</summary>
       <ol>
-        <li><strong>左栏选一轮实验（Campaign）</strong> —— 一次 <code>archzero run</code> 就是一轮。</li>
+        <li><strong>左栏选一轮实验（Campaign）</strong> —— 一次 <code>archzero flow</code> / <code>run</code> 就是一轮。进行中的轮次每 2 秒自动刷新，候选会随发散/漏斗陆续出现。</li>
         <li><strong>看顶部四格摘要</strong> —— 候选数 / 活到终点的数量 / 停在哪一层 / 头号失败原因。</li>
         <li><strong>漏斗从左到右</strong> —— 硬筛 → 对抗评审 → 解析模型 → 仿真 → RTL。数字是「通过 / 进入」。</li>
-        <li><strong>点开候选</strong> —— 看机制说明与各层裁决。需要对比两轮时，勾选两个 Campaign 再点「对比」。</li>
+        <li><strong>停止 / 删除</strong> —— 进行中可点「停止」；已停止或已完成的轮次才能删除。</li>
       </ol>
     </details>
   </section>
@@ -499,7 +503,7 @@
         <h2>实验轮次</h2>
         <span class="badge info" id="camp-count">0</span>
       </div>
-      <p class="hint">一次 <code>run</code> = 一轮。点选后右侧展示漏斗与候选。</p>
+      <p class="hint">一次 <code>flow</code> / <code>run</code> = 一轮。进行中自动刷新；可停止，停止后可删除。</p>
       <div id="campaigns" class="camp-list"><div class="empty">加载中…</div></div>
 
       <div class="panel-hd" style="margin-top:1.25rem">
@@ -611,6 +615,8 @@ const STATUS_LABELS = {
   running: "进行中",
   done: "已完成",
   failed: "失败",
+  stopped: "已停止",
+  paused: "已暂停",
   active: "进行中",
   new: "新建",
 };
@@ -619,11 +625,29 @@ let compareSel = [];
 let currentCandidates = [];
 let currentFilter = "all";
 let activeCampId = null;
+let pollTimer = null;
+let lastCamps = [];
 
-async function j(url) {
-  const r = await fetch(url);
+async function j(url, opts) {
+  const r = await fetch(url, opts);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+function progressLabel(c) {
+  const p = c.progress || {};
+  if (p.phase === "diverge") {
+    const n = p.generated ?? c.n_candidates ?? 0;
+    const cells = p.n_cells != null ? ` · 目标 ${p.n_cells}×${p.per_cell || "?"} 格` : "";
+    return `发散中 ${n} 个候选${cells}`;
+  }
+  if (p.phase === "funnel") {
+    const tier = TIER_LABELS[p.tier]?.name || p.tier || "";
+    return `漏斗 ${tier} · ${c.n_candidates ?? 0} 候选`;
+  }
+  if (p.phase === "ideate") return `生成中 ${p.generated ?? 0} 个候选`;
+  if (c.status === "running") return `进行中 · ${c.n_candidates ?? 0} 候选`;
+  return "";
 }
 
 function escapeHtml(s) {
@@ -668,24 +692,40 @@ function refreshComparePicks() {
   btn.disabled = compareSel.length !== 2;
 }
 
-async function loadCampaigns() {
+function schedulePoll(camps) {
+  clearTimeout(pollTimer);
+  if ((camps || []).some(c => c.status === "running")) {
+    pollTimer = setTimeout(() => loadCampaigns({ poll: true }), 2000);
+  }
+}
+
+async function loadCampaigns({ poll = false } = {}) {
   const camps = await j("/api/campaigns");
+  lastCamps = camps;
   document.getElementById("camp-count").textContent = String(camps.length);
   const el = document.getElementById("campaigns");
   if (!camps.length) {
     el.innerHTML = `<div class="empty">
       还没有任何实验轮次。<br/><br/>
       离线示例：<code>uv run archzero seed-demo</code><br/>
-      实跑：<code>uv run archzero run --spec specs/demo.md --n 5</code>
+      实跑：<code>uv run archzero flow --spec specs/dual-bufferless-ring-noc.md --through tier2</code>
     </div>`;
+    if (activeCampId) {
+      activeCampId = null;
+      document.getElementById("camp-title").textContent = "选择左侧一轮实验";
+      document.getElementById("camp-sub").textContent = "还没有选中 Campaign。";
+    }
+    schedulePoll(camps);
     return;
   }
-  el.innerHTML = camps.map(c => `
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:0.45rem;align-items:stretch">
+  el.innerHTML = camps.map(c => {
+    const prog = progressLabel(c);
+    return `
+    <div class="camp-row">
       <label style="display:flex;align-items:center;padding:0 0.15rem" title="勾选以对比">
-        <input type="checkbox" class="cmp" data-id="${escapeHtml(c.id)}" />
+        <input type="checkbox" class="cmp" data-id="${escapeHtml(c.id)}" ${compareSel.includes(c.id) ? "checked" : ""} />
       </label>
-      <button class="camp" data-id="${escapeHtml(c.id)}" type="button">
+      <button class="camp${c.id === activeCampId ? " active" : ""}" data-id="${escapeHtml(c.id)}" type="button">
         <span class="name">${escapeHtml(c.name)}</span>
         <span class="meta">
           ${statusBadge(c.status)}
@@ -693,8 +733,10 @@ async function loadCampaigns() {
           <span class="badge info">到 ${escapeHtml(c.through)}</span>
           <span class="mono">${escapeHtml(shortId(c.id))}</span>
         </span>
+        ${prog ? `<span class="meta" style="margin-top:0.25rem;color:var(--muted)">${escapeHtml(prog)}</span>` : ""}
       </button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   el.querySelectorAll("button.camp").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -720,9 +762,35 @@ async function loadCampaigns() {
     });
   });
 
-  const prefer = camps.find(c => c.id === activeCampId) || camps[0];
-  const btn = el.querySelector(`button.camp[data-id="${CSS.escape(prefer.id)}"]`);
-  btn?.click();
+  if (activeCampId && camps.some(c => c.id === activeCampId)) {
+    await loadDetail(activeCampId, { keepDetail: poll });
+  } else if (!poll) {
+    const prefer = camps[0];
+    const btn = el.querySelector(`button.camp[data-id="${CSS.escape(prefer.id)}"]`);
+    btn?.click();
+  }
+  schedulePoll(camps);
+}
+
+async function stopCampaign(id) {
+  await j(`/api/campaigns/${encodeURIComponent(id)}/stop`, { method: "POST" });
+  await loadCampaigns({ poll: true });
+}
+
+async function deleteCampaign(id) {
+  const camp = lastCamps.find(c => c.id === id);
+  const label = camp?.name || shortId(id);
+  if (!confirm(`删除轮次「${label}」及其全部候选？此操作不可恢复。`)) return;
+  try {
+    await j(`/api/campaigns/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (err) {
+    alert("无法删除：" + (err.message || err));
+    return;
+  }
+  compareSel = compareSel.filter(x => x !== id);
+  refreshComparePicks();
+  if (activeCampId === id) activeCampId = null;
+  await loadCampaigns();
 }
 
 async function runCompare() {
@@ -966,18 +1034,37 @@ function renderCandidates() {
   });
 }
 
-async function loadDetail(id) {
+async function loadDetail(id, { keepDetail = false } = {}) {
   activeCampId = id;
   const data = await j(`/api/campaigns/${id}`);
+  const st = data.campaign.status;
+  const stopBtn = st === "running"
+    ? `<button class="btn" type="button" id="camp-stop">停止</button>`
+    : "";
+  const delBtn = st !== "running"
+    ? `<button class="btn danger" type="button" id="camp-delete">删除</button>`
+    : "";
   document.querySelector("#main-panel .panel-hd").innerHTML = `
     <h2 id="camp-title">${escapeHtml(data.campaign.name || id)}</h2>
-    ${statusBadge(data.campaign.status)}
+    <span class="camp-actions">
+      ${statusBadge(st)}
+      ${stopBtn}
+      ${delBtn}
+    </span>
   `;
+  document.getElementById("camp-stop")?.addEventListener("click", () => stopCampaign(id));
+  document.getElementById("camp-delete")?.addEventListener("click", () => deleteCampaign(id));
+  const prog = progressLabel({
+    status: st,
+    n_candidates: data.summary?.n_candidates,
+    progress: data.campaign.progress,
+  });
   document.getElementById("camp-sub").innerHTML =
     `问题包 <code>${escapeHtml(data.campaign.problem_id || "—")}</code> ·
      目标层 <code>${escapeHtml(data.campaign.through)}</code>
      （${escapeHtml(TIER_LABELS[data.campaign.through]?.name || "")}） ·
-     id <code>${escapeHtml(data.campaign.id)}</code>`;
+     id <code>${escapeHtml(data.campaign.id)}</code>`
+    + (prog ? `<br/>${escapeHtml(prog)}` : "");
 
   renderAcc(data.acc);
   renderSummary(data);
@@ -988,7 +1075,9 @@ async function loadDetail(id) {
 
   currentCandidates = data.candidates || [];
   renderCandidates();
-  document.getElementById("detail").style.display = "none";
+  if (!keepDetail) {
+    document.getElementById("detail").style.display = "none";
+  }
 }
 
 async function showCandidate(id) {

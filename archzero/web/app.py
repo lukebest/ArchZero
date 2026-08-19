@@ -20,6 +20,25 @@ from archzero.store.db import Store
 STATIC = Path(__file__).with_name("static")
 
 
+def _campaign_progress(camp) -> dict[str, Any] | None:
+    meta = camp.meta or {}
+    progress = meta.get("progress")
+    return dict(progress) if isinstance(progress, dict) else None
+
+
+def _campaign_row(store: Store, c) -> dict[str, Any]:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "status": c.status,
+        "through": c.through_tier.value,
+        "problem_id": c.problem_id,
+        "created_at": c.created_at.isoformat(),
+        "n_candidates": len(store.list_candidates(campaign_id=c.id)),
+        "progress": _campaign_progress(c),
+    }
+
+
 def _funnel_stats(store: Store, campaign_id: str) -> list[dict[str, Any]]:
     cands = store.list_candidates(campaign_id=campaign_id)
     rows = []
@@ -152,23 +171,7 @@ def make_handler(cfg: FactoryConfig):
                 return
             if path == "/api/campaigns":
                 camps = store.list_campaigns()
-                self._json(
-                    200,
-                    [
-                        {
-                            "id": c.id,
-                            "name": c.name,
-                            "status": c.status,
-                            "through": c.through_tier.value,
-                            "problem_id": c.problem_id,
-                            "created_at": c.created_at.isoformat(),
-                            "n_candidates": len(
-                                store.list_candidates(campaign_id=c.id)
-                            ),
-                        }
-                        for c in camps
-                    ],
-                )
+                self._json(200, [_campaign_row(store, c) for c in camps])
                 return
             if path.startswith("/api/campaigns/"):
                 cid = path.split("/")[3]
@@ -197,6 +200,7 @@ def make_handler(cfg: FactoryConfig):
                             "through": camp.through_tier.value,
                             "problem_id": camp.problem_id,
                             "created_at": camp.created_at.isoformat(),
+                            "progress": _campaign_progress(camp),
                         },
                         "summary": {
                             "n_candidates": len(cands),
@@ -328,6 +332,39 @@ def make_handler(cfg: FactoryConfig):
                 self._html(STATIC / "quickstart.html")
                 return
             self._json(404, {"error": "not found", "path": path, "q": qs})
+
+        def do_POST(self) -> None:  # noqa: N802
+            parsed = urllib.parse.urlparse(self.path)
+            parts = [p for p in parsed.path.split("/") if p]
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "campaigns"
+                and parts[3] == "stop"
+            ):
+                camp = store.stop_campaign(parts[2])
+                if camp is None:
+                    self._json(404, {"error": "not found"})
+                    return
+                self._json(200, {"ok": True, "id": camp.id, "status": camp.status})
+                return
+            self._json(404, {"error": "not found", "path": parsed.path})
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            parsed = urllib.parse.urlparse(self.path)
+            parts = [p for p in parsed.path.split("/") if p]
+            if len(parts) == 3 and parts[0] == "api" and parts[1] == "campaigns":
+                try:
+                    store.delete_campaign(parts[2])
+                except KeyError:
+                    self._json(404, {"error": "not found"})
+                    return
+                except ValueError as exc:
+                    self._json(409, {"error": str(exc)})
+                    return
+                self._json(200, {"ok": True, "id": parts[2]})
+                return
+            self._json(404, {"error": "not found", "path": parsed.path})
 
     return Handler
 

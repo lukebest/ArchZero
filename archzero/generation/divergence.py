@@ -19,6 +19,7 @@ import logging
 import random
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from archzero.config import FactoryConfig
@@ -263,11 +264,15 @@ async def diverge(
     domain_ids: list[str] | None = None,
     llm: CursorLLM | None = None,
     seed: str | int | None = None,
+    on_candidates: Callable[[list[Candidate]], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[Candidate]:
     """Run the divergence matrix and return the raw idea pool.
 
     Cell failures are logged and skipped; a partial pool is far more useful
     than aborting the whole campaign because one prompt came back malformed.
+    ``on_candidates`` is called as each cell finishes so the dashboard can
+    show ideas before the whole matrix returns.
     """
     from archzero.worker.queue import LocalWorkerPool, WorkerJob
 
@@ -287,6 +292,8 @@ async def diverge(
         await llm.setup()
 
     async def _handle(job: WorkerJob[MatrixCell]) -> list[Candidate]:
+        if should_stop is not None and should_stop():
+            return []
         cell = job.payload
         raw = _parse_json(
             await llm.complete(
@@ -296,12 +303,17 @@ async def diverge(
                 expect_json=True,
             )
         )
-        return _to_candidates(raw, cell, problem)
+        cands = _to_candidates(raw, cell, problem)
+        if on_candidates and cands:
+            on_candidates(cands)
+        return cands
 
     try:
         pool = LocalWorkerPool(concurrency=cfg.budget.concurrency)
         results = await pool.map(
-            [WorkerJob(id=c.id, payload=c) for c in cells], _handle
+            [WorkerJob(id=c.id, payload=c) for c in cells],
+            _handle,
+            should_stop=should_stop,
         )
     finally:
         if own:

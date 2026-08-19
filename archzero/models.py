@@ -182,7 +182,7 @@ class Campaign(BaseModel):
     name: str
     problem_id: str
     through_tier: Tier = Tier.T2
-    status: str = "running"  # running | paused | done | failed
+    status: str = "running"  # running | paused | stopped | done | failed
     created_at: datetime = Field(default_factory=_now)
     meta: dict[str, Any] = Field(default_factory=dict)
 
