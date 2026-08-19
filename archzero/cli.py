@@ -571,7 +571,7 @@ def flow_cmd(
         1, "--patent-top", help="How many survivors to draft patents for"
     ),
 ) -> None:
-    """One shot: diverge → funnel → report (→ optional patent deck)."""
+    """One shot: seed-library + diverge → funnel → report (→ optional patent deck)."""
     from archzero.funnel.pipeline import run_campaign
     from archzero.logging_util import setup_logging
     from archzero.report.weekly import write_report
@@ -616,10 +616,13 @@ def flow_cmd(
             f"[green]resume[/green] {campaign_id} retried={result.get('retried', 0)}"
         )
     else:
+        inn = result.get("intake") or {}
         dv = result.get("divergence") or {}
         console.print(
-            f"[green]diverge[/green] {dv.get('n_cells', '?')} cells → "
-            f"{dv.get('generated', '?')} ideas → {result['generated']} after dedup"
+            f"[green]intake[/green] seeds={inn.get('seed_library', 0)} "
+            f"diverge={dv.get('generated', inn.get('divergence', 0))} "
+            f"→ {result['generated']} after dedup "
+            f"(collapse={inn.get('dedup_collapse', '?')})"
         )
     if result.get("stopped"):
         console.print(
@@ -630,7 +633,7 @@ def flow_cmd(
     console.print(
         f"[green]funnel[/green] {campaign_id} passed={result['passed']} "
         f"failed={result['failed']} active={result['active']} "
-        f"through={result.get('through', through)}"
+        f"through={result.get('through', through)} counts={result.get('funnel')}"
     )
 
     out.mkdir(parents=True, exist_ok=True)
