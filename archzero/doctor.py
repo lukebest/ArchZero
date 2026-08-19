@@ -137,6 +137,23 @@ def run_doctor(cfg: FactoryConfig) -> list[Check]:
         )
     )
 
+    from archzero.evolve.openevolve_adapter import openevolve_available, openevolve_root
+
+    oe = openevolve_root(cfg)
+    oe_ok = openevolve_available(cfg)
+    checks.append(
+        Check(
+            name="OpenEvolve",
+            ok=oe_ok or cfg.evolve.backend != "openevolve",
+            detail=(
+                f"{oe} — LLM calls go through archzero.llm.shim → Cursor"
+                if oe_ok
+                else f"missing {oe} — git submodule update --init vendor/openevolve"
+            ),
+            severity="warn" if cfg.evolve.backend == "openevolve" else "info",
+        )
+    )
+
     pyc = cfg.resolved_pycircuit_root()
     pyc_ok = pyc.is_dir() and (pyc / "compiler" / "frontend" / "pycircuit").is_dir()
     checks.append(

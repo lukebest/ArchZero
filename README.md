@@ -23,7 +23,7 @@
 | Tier3/4 gem5 | Scaffold | 需本机 gem5 + agent harness |
 | Tier5 RTL | Implemented | pyCircuit DSL→Verilog→Verilator；缺工具→UNAVAILABLE |
 | Tier6 Signoff | Deferred | **暂不实现** OpenROAD/sky130；`evaluate_tier6` 恒 UNAVAILABLE |
-| Evolution | Implemented | MAP-Elites + reenter；失败消除度量（OpenEvolve 仍为桥接） |
+| Evolution | Implemented | MAP-Elites + reenter；失败消除度量。OpenEvolve 经 `vendor/openevolve` + Cursor shim |
 | Corpus | Scaffold | 4 条目（含 1 条真实 PDF 示例）；`corpus` / `corpus-add-pdf` / `corpus-import-wiki` / `corpus-eval-offline`；不发明成功率 |
 | Scale-out | Prototype | Jaccard 去重 + `LocalWorkerPool`（单机） |
 | Feedback 遥测 | Deferred | **暂不实现**；`NullFeedbackSource` only |
@@ -600,7 +600,7 @@ docs/analysis-*.md  # 与外部仓库对照分析
 | 来源 | 用法 |
 |------|------|
 | [Gauntlet](https://github.com/lukebest/Gauntlet) | **已移除 submodule**。引擎（Anthropic/Gemini 脚本）未被调用；核心出题/评审/量化已在 ArchZero 用 Cursor SDK 重写。精选 `personas/` 迁入 `archzero/personas/` |
-| [openevolve](https://github.com/lukebest/openevolve) | 可选 vendored 到 `vendor/openevolve`；经 `archzero/llm/shim.py`（OpenAI 兼容）转发到 Cursor；否则用内置 MAP-Elites |
+| [openevolve](https://github.com/lukebest/openevolve) | submodule `vendor/openevolve`；`archzero evolve` 经 `archzero/llm/shim.py`（OpenAI 兼容）转发到 Cursor。缺 submodule 时回退 MAP-Elites |
 | [normative_language](https://github.com/lukebest/normative_language) | NDF 思想落地为 `archzero/spec`（轻量可运行版） |
 | [agentic_circuit_optimizer](https://github.com/lukebest/agentic_circuit_optimizer) | Tier5：提交点等价门 + PPA 钩子（Yosys/OpenSTA 可选） |
 

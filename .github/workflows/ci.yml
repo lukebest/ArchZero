@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init OpenEvolve submodule
+        run: git submodule update --init vendor/openevolve
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"

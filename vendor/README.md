@@ -22,7 +22,8 @@ pyc_toolchain_root = ".pycircuit_out/toolchain/install"
 ## OpenEvolve (evolution)
 
 ```bash
-git clone https://github.com/lukebest/openevolve.git vendor/openevolve
+git submodule update --init vendor/openevolve
+uv sync --extra openevolve
 ```
 
 ```toml
@@ -30,5 +31,7 @@ git clone https://github.com/lukebest/openevolve.git vendor/openevolve
 backend = "openevolve"
 ```
 
-Without OpenEvolve, `archzero evolve` uses built-in MAP-Elites. The shim at
-`archzero/llm/shim.py` forwards OE traffic to the Cursor SDK when OE is present.
+`archzero evolve` then starts `archzero/llm/shim.py` (OpenAI-compatible
+`/v1/chat/completions`) and points OpenEvolve at that URL so every LLM call
+goes through the Cursor SDK. Without the submodule, the adapter falls back to
+built-in MAP-Elites.

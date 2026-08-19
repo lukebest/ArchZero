@@ -31,6 +31,13 @@ dev = [
 patent = [
   "python-pptx>=1.0",
 ]
+# Vendored OpenEvolve (vendor/openevolve) talks to Cursor via llm/shim.py.
+openevolve = [
+  "openai>=1.0.0",
+  "numpy>=1.22.0",
+  "tqdm>=4.64.0",
+  "dacite>=1.9.2",
+]
 
 [project.scripts]
 archzero = "archzero.cli:app"

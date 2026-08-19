@@ -184,6 +184,7 @@ class SignConfig(BaseModel):
 
 class EvolveConfig(BaseModel):
     backend: str = "mapelites"  # mapelites | openevolve
+    openevolve_root: Path | None = None  # default: vendor/openevolve
     islands: int = 3
     generations: int = 10
     population_per_island: int = 20
