@@ -213,6 +213,8 @@ def _cell_prompt(
         f"请在上述组合约束下产出 {per_cell} 个互不相同的机制方案。"
         f"mechanism 必须是「决策 / 状态 / 冲突 / 相对基线」四段硬件说明，"
         f"不要用 {cell.domain.name} 或 {cell.lens.name} 的术语写正文。"
+        f"只改问题包已声明的拓扑、接口与自由度；"
+        f"不要发明 credit、额外拓扑、缓存 set 索引或规格里没有的资源。"
     )
 
 
@@ -261,8 +263,8 @@ async def diverge(
     cfg: FactoryConfig,
     problem: ProblemPackage,
     *,
-    n_cells: int = 24,
-    per_cell: int = 8,
+    n_cells: int = 12,
+    per_cell: int = 6,
     lens_ids: list[str] | None = None,
     domain_ids: list[str] | None = None,
     llm: CursorLLM | None = None,

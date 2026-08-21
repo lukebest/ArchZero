@@ -1,9 +1,7 @@
-"""No-LLM mechanism-family × DOF seed library for Tier0 volume.
+"""No-LLM mechanism-family × DOF seed library (optional volume).
 
-Divergence spends LLM budget on diversity (~``n_cells * per_cell`` ideas).
-This module supplies the rest of a ~1K entry pool by expanding discrete DOF
-knobs × mechanism families into distinct candidate markdown/objects — no
-ideation calls. Compatible with ``--seed-dir`` loading and pipeline merge.
+Off by default: the grid is for volume, not for topology-specific T0 physics.
+Enable via config or ``--seed-library``. Compatible with ``--seed-dir``.
 """
 
 from __future__ import annotations
@@ -250,7 +248,7 @@ def _mechanism_text(
 def generate_seed_library(
     problem: ProblemPackage,
     *,
-    target_n: int = 1000,
+    target_n: int = 80,
     domain: str | None = None,
 ) -> list[Candidate]:
     """Build up to ``target_n`` distinct no-LLM seed candidates for ``problem``."""

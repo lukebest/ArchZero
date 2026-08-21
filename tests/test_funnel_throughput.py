@@ -1,4 +1,4 @@
-"""Defaults + seed-library volume for the ~1K → ~100 → ~10 funnel shape."""
+"""Defaults + optional seed-library volume (capability, not default intake)."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ def test_repo_toml_matches_target_funnel_defaults():
     assert cfg.funnel.tier1_advisory is False
     assert cfg.funnel.tier0_batch_size == 10
     assert cfg.divergence.enabled is True
-    assert cfg.divergence.n_cells == 24
-    assert cfg.divergence.per_cell == 8
-    assert cfg.quotas.tier0_keep == 1000
-    assert cfg.quotas.tier1_keep == 100
+    assert cfg.divergence.n_cells == 12
+    assert cfg.divergence.per_cell == 6
+    assert cfg.quotas.tier0_keep == 80
+    assert cfg.quotas.tier1_keep == 40
     assert cfg.quotas.tier2_keep == 10
-    assert cfg.seed_library.enabled is True
-    assert cfg.seed_library.target_n == 1000
+    assert cfg.seed_library.enabled is False
+    assert cfg.seed_library.target_n == 80
 
 
 def test_factory_config_defaults_match_target_shape():
@@ -38,10 +38,11 @@ def test_factory_config_defaults_match_target_shape():
     assert cfg.funnel.tier1_advisory is False
     assert cfg.funnel.tier0_batch_size == 10
     assert cfg.divergence.enabled is True
-    assert cfg.quotas.tier0_keep == 1000
-    assert cfg.quotas.tier1_keep == 100
+    assert cfg.quotas.tier0_keep == 80
+    assert cfg.quotas.tier1_keep == 40
     assert cfg.quotas.tier2_keep == 10
-    assert cfg.seed_library.target_n == 1000
+    assert cfg.seed_library.enabled is False
+    assert cfg.seed_library.target_n == 80
 
 
 def test_seed_library_hits_1k_with_low_jaccard_collapse(demo_problem):

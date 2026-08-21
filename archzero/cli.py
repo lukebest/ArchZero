@@ -304,10 +304,10 @@ def run_cmd(
         help="Generate via the cross-domain matrix instead of repeated ideation",
     ),
     diverge_cells: Optional[int] = typer.Option(
-        None, "--diverge-cells", help="Matrix cells = LLM calls (default 24)"
+        None, "--diverge-cells", help="Matrix cells = LLM calls (default from config)"
     ),
     diverge_per_cell: Optional[int] = typer.Option(
-        None, "--diverge-per-cell", help="Ideas requested per cell (default 8)"
+        None, "--diverge-per-cell", help="Ideas requested per cell (default from config)"
     ),
     seed_library: Optional[bool] = typer.Option(
         None,
@@ -391,10 +391,10 @@ def diverge_cmd(
     spec: Path = typer.Option(..., "--spec", exists=True, help="Problem package"),
     out: Path = typer.Option(Path("divergence"), "--out", "-o"),
     cells: Optional[int] = typer.Option(
-        None, "--cells", help="Matrix cells = LLM calls (default 24)"
+        None, "--cells", help="Matrix cells = LLM calls (default from config)"
     ),
     per_cell: Optional[int] = typer.Option(
-        None, "--per-cell", help="Ideas requested per cell (default 8)"
+        None, "--per-cell", help="Ideas requested per cell (default from config)"
     ),
     lens: Optional[str] = typer.Option(
         None, "--lens", help="Comma-separated theory lens whitelist"
@@ -558,10 +558,10 @@ def flow_cmd(
         None, "--resume", help="Resume an existing campaign id"
     ),
     cells: Optional[int] = typer.Option(
-        None, "--cells", help="Divergence matrix cells (default 24)"
+        None, "--cells", help="Divergence matrix cells (default from config)"
     ),
     per_cell: Optional[int] = typer.Option(
-        None, "--per-cell", help="Ideas per cell (default 8)"
+        None, "--per-cell", help="Ideas per cell (default from config)"
     ),
     out: Path = typer.Option(Path("flow"), "--out", "-o", help="Output directory"),
     patent: bool = typer.Option(
@@ -571,7 +571,7 @@ def flow_cmd(
         1, "--patent-top", help="How many survivors to draft patents for"
     ),
 ) -> None:
-    """One shot: seed-library + diverge → funnel → report (→ optional patent deck)."""
+    """One shot: diverge (optional seed-library) → funnel → report (→ optional patent deck)."""
     from archzero.funnel.pipeline import run_campaign
     from archzero.logging_util import setup_logging
     from archzero.report.weekly import write_report

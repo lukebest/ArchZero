@@ -46,9 +46,9 @@ class BudgetConfig(BaseModel):
 
 
 class FunnelQuotas(BaseModel):
-    # Target single-spec shape: ~1K enter T0 → ~100 after T1 → ~10 after T2.
-    tier0_keep: int = 1000
-    tier1_keep: int = 100
+    # Spec-shaped pool, not a 1K knob grid.
+    tier0_keep: int = 80
+    tier1_keep: int = 40
     tier2_keep: int = 10
     tier3_keep: int = 5
     tier4_keep: int = 3
@@ -85,10 +85,9 @@ class FunnelConfig(BaseModel):
     model_exec_timeout_s: int = 30
     model_exec_mem_mb: int = 512
     # Tier0: screen N candidates per LLM call (0 = one call per candidate).
-    # Default 10 for large seed-library + divergence pools.
+    # Default 10; set 0 for one LLM call per candidate.
     tier0_batch_size: int = 10
-    # T1 is expert critique + ranking. When False, FAIL blocks T2 (real cut).
-    # When True, T1 critiques but does not veto — cannot shape 1K→100.
+    # T1 is expert critique + ranking. When False, FAIL blocks T2.
     tier1_advisory: bool = False
 
 
@@ -96,22 +95,20 @@ class DivergenceConfig(BaseModel):
     """Cross-domain mass ideation (theory lens x domain source x mode)."""
 
     enabled: bool = True
-    n_cells: int = 24
-    per_cell: int = 8
+    n_cells: int = 12
+    per_cell: int = 6
     lens_whitelist: list[str] = Field(default_factory=list)
     domain_whitelist: list[str] = Field(default_factory=list)
 
 
 class SeedLibraryConfig(BaseModel):
-    """No-LLM mechanism×DOF grid that supplies Tier0 volume.
-
-    Divergence alone yields ``n_cells * per_cell`` (~192) ideas. The seed
-    library fills toward ``target_n`` without 1000 independent ideation calls.
-    Disable with ``enabled=false`` or ``archzero run --no-seed-library``.
+    """No-LLM mechanism×DOF grid. Off by default — the grid fails T0 physics
+    on topology-specific specs. Enable with ``[seed_library] enabled=true``
+    or ``archzero run --seed-library``.
     """
 
-    enabled: bool = True
-    target_n: int = 1000
+    enabled: bool = False
+    target_n: int = 80
 
 
 class PatentConfig(BaseModel):
@@ -346,8 +343,8 @@ cursor_pool_max_calls = 0
 concurrency = 4
 
 [quotas]
-tier0_keep = 1000
-tier1_keep = 100
+tier0_keep = 80
+tier1_keep = 40
 tier2_keep = 10
 tier3_keep = 5
 tier4_keep = 3
@@ -361,22 +358,21 @@ strict_acc = true
 ensemble_n = 1
 use_verifiers = true
 llm_dedicated_sim = false
-# T1 veto restored: FAIL blocks T2 so the funnel can cut ~1K → ~100.
 tier1_advisory = false
 tier0_batch_size = 10
 
 [divergence]
 # Cross-domain mass ideation before Tier0. n_cells LLM calls -> n_cells*per_cell ideas.
 enabled = true
-n_cells = 24
-per_cell = 8
+n_cells = 12
+per_cell = 6
 # lens_whitelist = ["queueing_theory", "information_theory"]
 # domain_whitelist = ["tcp_congestion", "db_query_optimization"]
 
 [seed_library]
-# No-LLM mechanism×DOF grid; merged with diverge before Tier0.
-enabled = true
-target_n = 1000
+# Knob grid is optional volume; default off so T0 sees spec-shaped diverge ideas.
+enabled = false
+target_n = 80
 
 [patent]
 # Optional module. pptx rendering needs: uv sync --extra patent

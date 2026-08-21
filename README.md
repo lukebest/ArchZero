@@ -157,34 +157,33 @@ uv run archzero run --spec specs/demo.md --through tier2 --n 8
 uv run archzero report --out report.md
 ```
 
-一条命令走完「问题 → 海量 idea → SOTA 方案」（等价于 `diverge` + seed-library + `run` + `report`）：
+一条命令走完「问题 → 对题 idea → 漏斗」（默认 `diverge` + `run` + `report`）：
 
 ```bash
 uv run archzero flow --spec specs/demo.md --through tier2
 ```
 
-默认漏斗形状（单 NDF、一轮 campaign）：T0 入口 ~1000 → T1 后 ~100 → T2 后 ~10。
+默认漏斗形状（单 NDF、一轮 campaign）：跨域发散 ~72 进 T0 → 配额保留 80 / 40 / 10。
 配额见 `archzero.toml` 的 `[quotas]`；T1 默认否决（`tier1_advisory=false`）；
-Tier0 默认批量硬筛（`tier0_batch_size=10`）。
-
-无 LLM 的 mechanism×DOF 种子库负责体积；跨域发散只花 LLM 预算做多样性：
+Tier0 默认批量硬筛（`tier0_batch_size=10`）。无 LLM 的 knob 网格默认关闭
+（拓扑专用规格上过不了 T0 物理）；需要体积时再显式开：
 
 ```bash
-uv run archzero seed-library --spec specs/demo.md -o seeds/ --n 1000
+uv run archzero seed-library --spec specs/demo.md -o seeds/ --n 80
 uv run archzero run --spec specs/demo.md --seed-dir seeds/ --no-diverge --through tier0
-# 或默认：seed-library + diverge 自动合并进同一轮 intake
+# 默认：只 diverge，不灌种子网格
 uv run archzero run --spec specs/demo.md --through tier2
 ```
 
-跨领域海量发散（`8 理论透镜 × 24 跨域来源 × 3 发散模式` 组合矩阵，每个 cell 一次 LLM 调用）：
+跨领域发散（`8 理论透镜 × 24 跨域来源 × 3 发散模式` 组合矩阵，每个 cell 一次 LLM 调用）：
 
 ```bash
 uv run archzero diverge --spec specs/demo.md --dry-run          # 只看矩阵与调用数，不花钱
-uv run archzero diverge --spec specs/demo.md -o divergence/     # 24 次调用 → 192 个 idea
+uv run archzero diverge --spec specs/demo.md -o divergence/     # 默认 12 次调用 → 72 个 idea
 uv run archzero run --spec specs/demo.md --diverge --through tier2
 ```
 
-默认 `--cells 24 --per-cell 8`（≈192）与 seed-library（默认 1000）合并后再去重进 Tier0。
+默认 `--cells 12 --per-cell 6`（≈72）进 Tier0。加 `--seed-library` 才合并 knob 网格。
 `--lens` / `--domain` 可白名单收窄；来源目录见 `archzero/generation/domains.py`。
 每个 idea 的 `metrics` 会记下 `diverge_lens` / `diverge_domain` / `diverge_mode`，
 方便事后统计哪类跨域最能活到最后。
@@ -368,12 +367,12 @@ uv run archzero run --spec specs/demo.md [--pdf paper.pdf] \
 
 #### `--n` 与候选从哪来（优先级）
 
-1. `--seed-dir` 和/或默认 `seed_library` → 无 LLM 种子（体积）  
-2. 若 `divergence.enabled`（默认开）或 `--diverge` → 跨域矩阵 idea（多样性），与种子**合并**后再去重  
+1. `--seed-dir` 和/或显式 `--seed-library` → 无 LLM 种子（体积，默认关）  
+2. 若 `divergence.enabled`（默认开）或 `--diverge` → 跨域矩阵 idea，与种子（若有）**合并**后再去重  
 3. 否则若给了 `--pdf` → clean-room：读论文 + 对照 `--spec`，生成 `--n` 个机制候选  
 4. 否则 → 仅按问题包条款 / DOF 独立生成 `--n` 个候选  
 
-关闭体积路径：`--no-seed-library`；关闭发散：`--no-diverge`。两者都关且无 `--seed-dir` 时才走 `--n` 独立出题。
+打开体积路径：`--seed-library`；关闭发散：`--no-diverge`。两者都关且无 `--seed-dir` 时才走 `--n` 独立出题。
 
 ### 有论文 PDF vs 无论文 PDF
 
